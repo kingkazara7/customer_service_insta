@@ -1,7 +1,7 @@
 /**
- * 演示用假支付模块 —— 不接任何真实支付网关,不产生真实扣款。
- * 规则:Visa 卡号(4 开头、16 位数字、通过 Luhn 校验)即支付成功。
- * 生产环境将本模块替换为 Stripe/Adyen 等网关适配器,接口不变。
+ * DEMO-ONLY fake payment module — no real payment gateway, no real charges.
+ * Rule: a Visa number (starts with 4, 16 digits, passes the Luhn check) succeeds.
+ * In production, swap this module for a Stripe/Adyen adapter; the interface stays the same.
  */
 
 export type CardValidation =
@@ -10,10 +10,10 @@ export type CardValidation =
 
 export function validateVisa(cardNoRaw: string): CardValidation {
   const cardNo = cardNoRaw.replace(/[\s-]/g, "");
-  if (!/^\d+$/.test(cardNo)) return { valid: false, reason: "卡号只能包含数字" };
-  if (!cardNo.startsWith("4")) return { valid: false, reason: "仅支持 Visa 卡(4 开头)" };
-  if (cardNo.length !== 16) return { valid: false, reason: "Visa 卡号应为 16 位数字" };
-  if (!luhn(cardNo)) return { valid: false, reason: "卡号校验位不正确,请检查输入" };
+  if (!/^\d+$/.test(cardNo)) return { valid: false, reason: "Card number must contain only digits" };
+  if (!cardNo.startsWith("4")) return { valid: false, reason: "Only Visa cards are supported (number starts with 4)" };
+  if (cardNo.length !== 16) return { valid: false, reason: "A Visa number must be 16 digits" };
+  if (!luhn(cardNo)) return { valid: false, reason: "The card number failed validation — please check for typos" };
   return { valid: true, last4: cardNo.slice(-4) };
 }
 
@@ -37,7 +37,7 @@ export type ChargeResult =
 export function charge(cardNoRaw: string, amount: number): ChargeResult {
   const v = validateVisa(cardNoRaw);
   if (!v.valid) return { ok: false, reason: v.reason };
-  if (amount <= 0) return { ok: false, reason: "金额无效" };
+  if (amount <= 0) return { ok: false, reason: "Invalid amount" };
   return {
     ok: true,
     receiptId: `DEMO-${Date.now().toString(36).toUpperCase()}`,

@@ -7,9 +7,11 @@ import { profileSummary } from "../services/users";
 export type Emit = (ev: ServerEvent) => void;
 
 /**
- * Agent 层:只负责三个模糊节点 —— 故障诊断、零件模糊匹配、自由问答。
- * LLM 可用(ANTHROPIC_API_KEY 或 Bedrock)→ Claude Agent SDK + 只读 MCP 工具;
- * 不可用 → 确定性降级路径(关键词 RAG + 模板),功能完整,保证演示可用。
+ * Agent layer — handles only the three fuzzy nodes: fault diagnosis,
+ * fuzzy part matching, and free-form Q&A.
+ * When an LLM is available (ANTHROPIC_API_KEY or Bedrock) it runs the
+ * Claude Agent SDK with read-only MCP tools; otherwise it degrades to a
+ * deterministic path (RAG retrieval + templates) so the demo never breaks.
  */
 
 function llmAvailable(): boolean {
@@ -19,23 +21,23 @@ function llmAvailable(): boolean {
   );
 }
 
-const SCOPE_GUARD = `你是 PartSelect 的客服助手,只处理"冰箱"和"洗碗机"零件相关的问题:故障诊断、零件查询、兼容性、安装指导、订单咨询。
-超出此范围的任何请求(其他家电、写代码、闲聊、新闻等),一律礼貌回复:"抱歉,我只能协助处理冰箱和洗碗机零件相关的问题。"并引导用户回到主菜单。
-兼容性问题必须调用 check_compatibility 工具回答,禁止凭记忆;推荐零件前必须先调用 search_repair_guides 或 search_parts。
-回答用中文,简洁,不超过 200 字正文。`;
+const SCOPE_GUARD = `You are a customer service assistant for PartSelect. You ONLY handle questions about REFRIGERATOR and DISHWASHER parts: fault diagnosis, part lookup, compatibility, installation guidance, and order inquiries.
+For anything outside that scope (other appliances, coding, chit-chat, news, etc.), politely reply: "Sorry, I can only help with refrigerator and dishwasher parts." and point the user back to the main menu.
+Compatibility questions MUST be answered by calling the check_compatibility tool — never from memory. Before recommending parts you MUST call search_repair_guides or search_parts.
+Answer in English, concisely — at most 200 words of body text.`;
 
 function sessionContext(s: Session): string {
   const parts: string[] = [profileSummary(s.userId)];
-  if (s.modelNo) parts.push(`当前会话家电型号: ${s.modelNo}`);
+  if (s.modelNo) parts.push(`Appliance model in this session: ${s.modelNo}`);
   if (s.lastPartNos.length > 0)
-    parts.push(`最近展示过的零件: ${s.lastPartNos.join(", ")}`);
-  if (s.installPartNo) parts.push(`正在咨询安装的零件: ${s.installPartNo}`);
+    parts.push(`Parts shown most recently: ${s.lastPartNos.join(", ")}`);
+  if (s.installPartNo) parts.push(`Part being installed: ${s.installPartNo}`);
   return parts.join("\n");
 }
 
 const PART_NO_RE = /PS\d{6,9}/gi;
 
-/** 通用 LLM 调用:流式转发文本,返回完整文本(供解析零件号) */
+/** Shared LLM call: streams text to the client and returns the full text (for parsing part numbers) */
 async function runLlm(s: Session, prompt: string, emit: Emit): Promise<string> {
   const { query } = await import("@anthropic-ai/claude-agent-sdk");
   const { catalogServer } = await import("../mcp/index");
@@ -43,7 +45,7 @@ async function runLlm(s: Session, prompt: string, emit: Emit): Promise<string> {
   const result = query({
     prompt,
     options: {
-      systemPrompt: `${SCOPE_GUARD}\n\n## 用户与会话背景\n${sessionContext(s)}`,
+      systemPrompt: `${SCOPE_GUARD}\n\n## User & session context\n${sessionContext(s)}`,
       mcpServers: { "partselect-catalog": catalogServer },
       allowedTools: [
         "mcp__partselect-catalog__search_parts",
@@ -74,7 +76,7 @@ async function runLlm(s: Session, prompt: string, emit: Emit): Promise<string> {
   return full;
 }
 
-/** 故障诊断:先自助排查,再给推荐零件号列表(由状态机渲染成卡片) */
+/** Fault diagnosis: self-help checks first, then recommended part numbers (rendered as cards by the state machine) */
 export async function agentDiagnose(
   s: Session,
   faultText: string,
@@ -84,8 +86,8 @@ export async function agentDiagnose(
     try {
       const full = await runLlm(
         s,
-        `用户家电${s.modelNo ? `(型号 ${s.modelNo})` : ""}出现故障:"${faultText}"。
-请:1) 调用 search_repair_guides 查维修知识库;2) 先给出 2-3 步用户可以自己尝试的排查步骤;3) 调用 search_parts(限定型号)找出最可能需要更换的零件;4) 最后单独一行输出 RECOMMEND: 后跟零件号(逗号分隔,最多3个),没有合适零件则输出 RECOMMEND: none。不要在正文里写价格,价格由系统卡片展示。`,
+        `The user's appliance${s.modelNo ? ` (model ${s.modelNo})` : ""} has a problem: "${faultText}".
+Please: 1) call search_repair_guides to consult the repair knowledge base; 2) give 2-3 troubleshooting steps the user can try themselves first; 3) call search_parts (scoped to the model) to find the parts most likely to need replacement; 4) finish with a single line "RECOMMEND:" followed by the part numbers (comma-separated, max 3), or "RECOMMEND: none" if nothing fits. Do not mention prices in the text — the system shows prices on the cards.`,
         emit
       );
       const rec = full.match(/RECOMMEND:\s*(.+)/i)?.[1] ?? "";
@@ -95,7 +97,7 @@ export async function agentDiagnose(
       console.error("agentDiagnose LLM failed, falling back:", err);
     }
   }
-  // ── 降级路径:RAG(向量优先,自动退回关键词)+ 症状搜索 ──
+  // ── Degraded path: RAG (vector first, keyword fallback) + symptom search ──
   const chunks = await retrieveChunks({
     query: faultText,
     applianceType: s.applianceType,
@@ -104,14 +106,14 @@ export async function agentDiagnose(
   if (chunks.length > 0) {
     emit({
       kind: "text",
-      text: `根据维修知识库,建议您先尝试以下排查:\n\n${chunks[0].chunk_text}${
-        chunks[0].source_url ? `\n\n📖 来源: ${chunks[0].source_url}` : ""
+      text: `Based on our repair guides, try these troubleshooting steps first:\n\n${chunks[0].chunk_text}${
+        chunks[0].source_url ? `\n\n📖 Source: ${chunks[0].source_url}` : ""
       }`,
     });
   } else {
     emit({
       kind: "text",
-      text: "我没有找到完全匹配的维修指南,以下是根据症状推荐的零件:",
+      text: "I couldn't find an exact repair guide for that, but here are the parts that best match the symptom:",
     });
   }
   const hits = searchParts({
@@ -121,12 +123,15 @@ export async function agentDiagnose(
     limit: 3,
   });
   if (chunks.length > 0 && hits.length > 0) {
-    emit({ kind: "text", text: "如果排查后仍未解决,以下零件最可能需要更换:" });
+    emit({
+      kind: "text",
+      text: "If the checks above don't solve it, these are the parts most likely to need replacement:",
+    });
   }
   return hits.map((p) => p.part_no);
 }
 
-/** 预购分支:模糊零件描述匹配(状态机先做过精确搜索,无果才会调到这里) */
+/** Pre-order branch: fuzzy part-description matching (the state machine already tried an exact search) */
 export async function agentMatchParts(
   s: Session,
   descText: string,
@@ -136,8 +141,8 @@ export async function agentMatchParts(
     try {
       const full = await runLlm(
         s,
-        `用户想购买零件,描述是:"${descText}"${s.modelNo ? `,家电型号 ${s.modelNo}` : ""}。
-请调用 search_parts / get_parts_for_model 找出匹配的零件,用一句话说明匹配理由,最后单独一行输出 RECOMMEND: 后跟零件号(逗号分隔,最多3个),找不到输出 RECOMMEND: none。`,
+        `The user wants to buy a part described as: "${descText}"${s.modelNo ? ` for appliance model ${s.modelNo}` : ""}.
+Call search_parts / get_parts_for_model to find matching parts, explain the match in one sentence, then finish with a single line "RECOMMEND:" followed by part numbers (comma-separated, max 3), or "RECOMMEND: none" if nothing matches.`,
         emit
       );
       const rec = full.match(/RECOMMEND:\s*(.+)/i)?.[1] ?? "";
@@ -147,7 +152,7 @@ export async function agentMatchParts(
       console.error("agentMatchParts LLM failed, falling back:", err);
     }
   }
-  // 降级:放宽限定条件再搜一次(去掉型号限定)
+  // Degraded path: search again with looser constraints (drop the model filter)
   const hits = searchParts({
     query: descText,
     applianceType: s.applianceType,
@@ -157,14 +162,14 @@ export async function agentMatchParts(
     emit({
       kind: "text",
       text: s.modelNo
-        ? `没有找到与 ${s.modelNo} 完全匹配的零件,以下是相近的零件(请注意核对兼容性):`
-        : "为您找到以下相近零件:",
+        ? `I didn't find an exact match for the ${s.modelNo}, but these are close — please double-check compatibility:`
+        : "Here are the closest matching parts I found:",
     });
   }
   return hits.map((p) => p.part_no);
 }
 
-/** 自由问答(主菜单自由输入、安装追问):范围防护栏生效 */
+/** Free-form Q&A (main-menu free text, installation follow-ups) with the scope guardrail */
 export async function agentAnswer(
   s: Session,
   text: string,
@@ -178,7 +183,7 @@ export async function agentAnswer(
       console.error("agentAnswer LLM failed, falling back:", err);
     }
   }
-  // 降级:RAG 命中则给知识库内容,否则按范围外处理
+  // Degraded path: answer from the knowledge base if it matches, otherwise treat as out of scope
   const chunks = await retrieveChunks({
     query: text,
     applianceType: s.applianceType,
@@ -190,14 +195,14 @@ export async function agentAnswer(
       kind: "text",
       text: `${chunks[0].chunk_text}${
         chunks[0].source_url
-          ? `\n\n📖 来源: ${chunks[0].source_url}${chunks[0].source_ref ? `(${chunks[0].source_ref})` : ""}`
+          ? `\n\n📖 Source: ${chunks[0].source_url}${chunks[0].source_ref ? ` (${chunks[0].source_ref})` : ""}`
           : ""
       }`,
     });
   } else {
     emit({
       kind: "text",
-      text: "抱歉,我只能协助处理冰箱和洗碗机零件相关的问题。您可以从下方菜单选择服务,或换个方式描述您的零件问题。",
+      text: "Sorry, I can only help with refrigerator and dishwasher parts. Pick an option from the menu below, or try describing your part question differently.",
     });
   }
 }

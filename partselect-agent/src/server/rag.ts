@@ -3,9 +3,11 @@ import { searchDocChunks, type DocChunk } from "./services/catalog";
 import { getEmbeddingProvider, cosineSim, blobToVec } from "./embeddings/provider";
 
 /**
- * RAG 统一入口:有向量(已跑过 embed 脚本 + provider 可用)→ 余弦相似度检索;
- * 否则退回关键词检索。调用方无感知。
- * SQLite 下在进程内算余弦(演示规模毫秒级);RDS pgvector 下换成 `<=>` 操作符即可。
+ * Unified RAG entry point: when vectors exist (embed script has run and a
+ * provider is configured) → cosine-similarity retrieval; otherwise fall back
+ * to keyword retrieval. Callers never notice the difference.
+ * On SQLite, cosine runs in-process (milliseconds at demo scale); on RDS
+ * pgvector this becomes the `<=>` operator.
  */
 export async function retrieveChunks(opts: {
   query: string;

@@ -11,11 +11,11 @@ export function getOrCreateDemoUser(): number {
   if (row) return row.id;
   return Number(
     db.prepare("INSERT INTO users (email, name) VALUES (?,?)")
-      .run("demo@example.com", "演示用户").lastInsertRowid
+      .run("demo@example.com", "Demo User").lastInsertRowid
   );
 }
 
-/** 家电卡片视图的数据源 */
+/** Data source for the appliance-card view */
 export function getAppliances(userId: number): UserAppliance[] {
   return getDb()
     .prepare(
@@ -27,7 +27,7 @@ export function getAppliances(userId: number): UserAppliance[] {
     .all(userId) as UserAppliance[];
 }
 
-/** 安装分支"历史已购零件"快捷选择 */
+/** Quick-pick list of previously purchased parts (install branch) */
 export function getPurchasedParts(userId: number) {
   return getDb()
     .prepare(
@@ -53,7 +53,7 @@ export function upsertAppliance(
     .prepare("SELECT id FROM appliance_models WHERE model_no = ? COLLATE NOCASE")
     .get(modelNo.trim()) as { id: number } | undefined;
   if (!model) return;
-  // purchased 优先级高于 searched,不被降级
+  // "purchased" outranks "searched" and is never downgraded
   db.prepare(
     `INSERT INTO user_appliances (user_id, model_id, source) VALUES (?,?,?)
      ON CONFLICT(user_id, model_id) DO UPDATE SET
@@ -84,14 +84,15 @@ export function getSavedAddress(userId: number): Record<string, string> | null {
 }
 
 /**
- * 注入给 Agent 的一行式用户画像(代替回放历史会话,核心省 token 手段)。
+ * One-line user profile injected into the agent context — replaces replaying
+ * past conversations and is a key token-saving measure.
  */
 export function profileSummary(userId: number): string {
   const appliances = getAppliances(userId);
   const parts = getPurchasedParts(userId);
   const a = appliances
-    .map((x) => `${x.brand} ${x.model_no}(${x.appliance_type === "refrigerator" ? "冰箱" : "洗碗机"},${x.source === "purchased" ? "已购" : "查询过"})`)
-    .join("、");
-  const p = parts.map((x) => `${x.part_no} ${x.name}`).join("、");
-  return `用户家电: ${a || "无记录"}。历史购买零件: ${p || "无"}。`;
+    .map((x) => `${x.brand} ${x.model_no} (${x.appliance_type}, ${x.source === "purchased" ? "owned" : "searched"})`)
+    .join(", ");
+  const p = parts.map((x) => `${x.part_no} ${x.name}`).join(", ");
+  return `User appliances: ${a || "none on file"}. Previously purchased parts: ${p || "none"}.`;
 }

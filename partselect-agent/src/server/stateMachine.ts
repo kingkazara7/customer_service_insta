@@ -16,10 +16,15 @@ import { charge } from "./services/payments";
 import { agentDiagnose, agentMatchParts, agentAnswer, type Emit } from "./agent";
 
 const PART_NO_RE = /PS\d{6,9}/i;
-// 家电型号样式:字母开头的 8-14 位字母数字串(如 WDT780SAEM1);排除 PS 零件号
+// Appliance model pattern: letters followed by digits, 8-14 chars (e.g. WDT780SAEM1).
+// Negative lookahead excludes PS part numbers.
 const MODEL_NO_RE = /\b(?!PS\d)[A-Z]{2,4}\d{3}[A-Z0-9]{2,9}\b/i;
 
-const APOLOGY = "抱歉,我们查询不到您所寻找的配件。";
+const APOLOGY = "Sorry, we couldn't find the part you're looking for.";
+
+function applianceTypeName(t: string): string {
+  return t === "refrigerator" ? "refrigerator" : "dishwasher";
+}
 
 function toCard(p: Part, sessionModelNo?: string): PartCard {
   let compatible: boolean | null = null;
@@ -60,7 +65,7 @@ function guideView(g: NonNullable<ReturnType<typeof getInstallGuide>>): InstallG
   };
 }
 
-/** ⟦P 模块⟧零件卡片与库存判定:查到有库存→卡片;无库存→提示;查不到→相近选项 */
+/** P module: part cards with stock states (in stock → card; out of stock → notice) */
 function emitPartCards(s: Session, emit: Emit, parts: Part[]): void {
   if (parts.length === 0) return;
   s.lastPartNos = parts.map((p) => p.part_no).slice(0, 5);
@@ -69,12 +74,12 @@ function emitPartCards(s: Session, emit: Emit, parts: Part[]): void {
   for (const p of oos) {
     emit({
       kind: "text",
-      text: `⚠️ ${p.name}(${p.part_no})该零件已经没有库存,暂时无法订购。到货后我们可以通知您,或者看看上面其他有货的替代零件。`,
+      text: `⚠️ ${p.name} (${p.part_no}) is currently out of stock and can't be ordered right now. We can notify you when it's back in stock, or take a look at an in-stock alternative above.`,
     });
   }
 }
 
-/** P 模块:按零件号查询的完整判定路径 */
+/** P module: full lookup path for a part number */
 function lookupPartFlow(s: Session, emit: Emit, partNoInput: string): void {
   const part = getPartByNo(partNoInput);
   recordSearch(s.userId, partNoInput, s.modelNo, part?.part_no);
@@ -86,7 +91,7 @@ function lookupPartFlow(s: Session, emit: Emit, partNoInput: string): void {
   if (similar.length > 0) {
     emit({
       kind: "text",
-      text: `无法查询到对应配件「${partNoInput}」,以下是相近的配件,看看有没有您要找的:`,
+      text: `We couldn't find part "${partNoInput}". Here are some close matches — is one of these what you're looking for?`,
     });
     emit({
       kind: "part_chips",
@@ -98,7 +103,7 @@ function lookupPartFlow(s: Session, emit: Emit, partNoInput: string): void {
   }
 }
 
-/** ⟦M 模块⟧型号查询:查到→按 intent 续走;查不到→相近选项;都不选→致歉回主菜单 */
+/** M module: model lookup → found: continue by intent; not found: similar options; none → apology */
 function modelLookupFlow(s: Session, emit: Emit, modelInput: string): void {
   const model = getModelByNo(modelInput);
   if (model) {
@@ -107,7 +112,7 @@ function modelLookupFlow(s: Session, emit: Emit, modelInput: string): void {
     recordSearch(s.userId, modelInput, model.model_no);
     emit({
       kind: "text",
-      text: `✓ 已确认型号:${model.brand} ${model.model_no}${model.name ? `(${model.name})` : ""}`,
+      text: `✓ Model confirmed: ${model.brand} ${model.model_no}${model.name ? ` (${model.name})` : ""}`,
     });
     proceedAfterModel(s, emit);
     return;
@@ -116,7 +121,7 @@ function modelLookupFlow(s: Session, emit: Emit, modelInput: string): void {
   if (similar.length > 0) {
     emit({
       kind: "text",
-      text: `无法查询到对应型号「${modelInput}」,以下是相近的型号,请选择:`,
+      text: `We couldn't find model "${modelInput}". Here are some close matches — please pick yours:`,
     });
     emit({
       kind: "model_chips",
@@ -134,13 +139,13 @@ function proceedAfterModel(s: Session, emit: Emit): void {
     s.stage = "await_fault_desc";
     emit({
       kind: "text",
-      text: "请描述一下故障现象(比如:制冰机不出冰、洗完餐具不干、底部积水排不出去……越具体越好):",
+      text: "Please describe the problem (e.g. ice maker not making ice, dishes come out wet, standing water in the bottom… the more specific, the better):",
     });
   } else if (s.intent === "preorder") {
     s.stage = "await_part_desc";
     emit({
       kind: "text",
-      text: "请描述您需要的零件(比如:门上放调料的盒子、下面碗架的轮子……):",
+      text: "Please describe the part you need (e.g. the bin on the door that holds condiments, the wheel on the lower rack…):",
     });
   } else {
     backToMenu(s, emit);
@@ -156,7 +161,7 @@ function backToMenu(s: Session, emit: Emit): void {
 function startCheckout(s: Session, emit: Emit): void {
   const cart = cartView(s.userId);
   if (cart.items.length === 0) {
-    emit({ kind: "text", text: "您的购物车还是空的,先挑选需要的零件吧。" });
+    emit({ kind: "text", text: "Your cart is empty — let's find the parts you need first." });
     backToMenu(s, emit);
     return;
   }
@@ -165,70 +170,71 @@ function startCheckout(s: Session, emit: Emit): void {
   emit({
     kind: "yesno",
     id: "confirm_order",
-    prompt: `共 ${cart.count} 件零件,合计 $${cart.total.toFixed(2)}。确认这份订单吗?`,
+    prompt: `${cart.count} item${cart.count > 1 ? "s" : ""}, total $${cart.total.toFixed(2)}. Place this order?`,
   });
 }
 
-/** 主菜单自由输入的确定性意图路由(零 token 捷径优先,兜不住才进 Agent) */
+/** Deterministic intent routing for free text (zero-token shortcuts first, agent as fallback) */
 async function routeFreeText(s: Session, emit: Emit, text: string): Promise<void> {
   const partNoMatch = text.match(PART_NO_RE);
   const modelMatch = text.match(MODEL_NO_RE);
-  const wantsInstall = /安装|怎么装|如何装|install/i.test(text);
-  const wantsCompat = /兼容|适配|适合|匹配|compatible|fit/i.test(text);
-  const wantsBroken = /坏|不工作|不制冷|不出冰|不排水|不进水|漏水|异响|修|故障|broken|fix|repair|not working|leak/i.test(text);
-  const wantsBuy = /买|购|订购|需要|order|buy|purchase/i.test(text);
+  const wantsInstall = /install|installation/i.test(text);
+  const wantsCompat = /compatib|\bfits?\b|work(s)? with|right for/i.test(text);
+  const wantsBroken =
+    /broken|not working|won'?t|doesn'?t|stopped|stuck|fix|repair|leak|nois[ye]|not cooling|not draining|not drying|no ice|error code/i.test(text);
+  const wantsBuy = /\bbuy\b|\border\b|purchase|replacement|looking for|need a/i.test(text);
 
-  // 捷径 1:零件号 + 安装意图 → 安装卡片
+  // Shortcut 1: part number + install intent → installation card
   if (partNoMatch && wantsInstall) {
     s.intent = "install";
     showInstallGuide(s, emit, partNoMatch[0].toUpperCase());
     return;
   }
-  // 捷径 2:零件号 + 兼容性(型号取消息里的,或会话上下文的)
+  // Shortcut 2: part number + compatibility (model from message or session context)
   if (partNoMatch && wantsCompat) {
     answerCompatibility(s, emit, partNoMatch[0].toUpperCase(), modelMatch?.[0]?.toUpperCase());
     return;
   }
-  // 捷径 3:"这个零件"代词 + 兼容性 → 用最近展示的零件
+  // Shortcut 3: pronoun ("this part") + compatibility → most recently shown part
   if (!partNoMatch && wantsCompat && s.lastPartNos.length > 0) {
     answerCompatibility(s, emit, s.lastPartNos[0], modelMatch?.[0]?.toUpperCase());
     return;
   }
-  // 捷径 4:裸零件号 → 零件卡片
+  // Shortcut 4: bare part number → part card
   if (partNoMatch) {
     lookupPartFlow(s, emit, partNoMatch[0].toUpperCase());
     return;
   }
-  // 捷径 5:报修语义 → 损坏分支(带型号识别)
+  // Shortcut 5: repair phrasing → broken branch (with model detection)
   if (wantsBroken) {
     s.intent = "broken";
     if (modelMatch) {
       modelLookupFlow(s, emit, modelMatch[0].toUpperCase());
     } else if (s.modelNo) {
       s.stage = "await_fault_desc";
-      await handleFaultDesc(s, emit, text); // 描述已经在消息里了,直接诊断
+      await handleFaultDesc(s, emit, text); // the message already contains the symptom
     } else {
       s.stage = "await_model";
-      pushHistory(s, "user", text); // 保留故障描述,拿到型号后仍可用
+      pushHistory(s, "user", text); // keep the symptom; still useful once we have the model
       emit({
         kind: "text",
-        text: "好的,先告诉我您的家电型号(机身铭牌上,比如 WDT780SAEM1),我来帮您诊断:",
+        text: "Got it. First, what's your appliance's model number? (on the nameplate — e.g. WDT780SAEM1) Then I'll help you diagnose it:",
       });
     }
     return;
   }
-  // 捷径 6:购买语义 → 预购分支
+  // Shortcut 6: purchase phrasing → pre-order branch
   if (wantsBuy) {
     s.intent = "preorder";
     s.stage = "menu";
     emit({
       kind: "yesno",
       id: "know_partno",
-      prompt: "您知道零件的 PartSelect 型号吗?(类似 PS11752778)",
+      prompt: "Do you know the PartSelect part number? (it looks like PS11752778)",
     });
     return;
   }
-  // 捷径 7:裸型号 → 设为会话上下文
+  // Shortcut 7: bare model number → set session context
   if (modelMatch && getModelByNo(modelMatch[0])) {
     s.modelNo = modelMatch[0].toUpperCase();
     const m = getModelByNo(s.modelNo)!;
@@ -236,12 +242,12 @@ async function routeFreeText(s: Session, emit: Emit, text: string): Promise<void
     recordSearch(s.userId, text, s.modelNo);
     emit({
       kind: "text",
-      text: `✓ 已记住您的家电:${m.brand} ${m.model_no}。需要什么帮助?`,
+      text: `✓ Got it — your appliance is the ${m.brand} ${m.model_no}. What do you need?`,
     });
     emit({ kind: "menu" });
     return;
   }
-  // 兜底:Agent 自由问答(范围防护栏内)
+  // Fallback: agent free-form answer (within the scope guardrail)
   pushHistory(s, "user", text);
   await agentAnswer(s, text, emit);
 }
@@ -256,7 +262,7 @@ function answerCompatibility(
     s.lastPartNos = [partNo];
     emit({
       kind: "text",
-      text: "请告诉我您的家电型号(机身铭牌上),我来帮您核对兼容性:",
+      text: "Sure — what's your appliance's model number? (on the nameplate) I'll check compatibility:",
     });
     return;
   }
@@ -274,13 +280,13 @@ function answerCompatibility(
   if (r.compatible) {
     emit({
       kind: "text",
-      text: `✅ 兼容!${r.part!.name}(${partNo})适配您的 ${r.model!.brand} ${r.model!.model_no}。`,
+      text: `✅ Compatible! The ${r.part!.name} (${partNo}) fits your ${r.model!.brand} ${r.model!.model_no}.`,
     });
     emitPartCards(s, emit, [r.part!]);
   } else {
     emit({
       kind: "text",
-      text: `❌ 不兼容:${r.part!.name}(${partNo})不适配 ${r.model!.brand} ${r.model!.model_no}(它是${r.part!.appliance_type === "refrigerator" ? "冰箱" : "洗碗机"}零件)。需要的话我可以帮您找适配 ${r.model!.model_no} 的零件。`,
+      text: `❌ Not compatible: the ${r.part!.name} (${partNo}) does not fit the ${r.model!.brand} ${r.model!.model_no} — it's a ${applianceTypeName(r.part!.appliance_type)} part. I can help you find parts that do fit the ${r.model!.model_no} if you'd like.`,
     });
   }
 }
@@ -293,7 +299,7 @@ function showInstallGuide(s: Session, emit: Emit, partNo: string): void {
   }
   const guide = getInstallGuide(partNo);
   s.installPartNo = part.part_no;
-  s.lastPartNos = [part.part_no]; // 供"这个零件兼容吗"等代词消解
+  s.lastPartNos = [part.part_no]; // enables pronoun resolution ("is this part compatible…")
   recordSearch(s.userId, `install ${partNo}`, s.modelNo, part.part_no);
   if (guide) {
     emit({ kind: "install_card", guide: guideView(guide) });
@@ -301,13 +307,13 @@ function showInstallGuide(s: Session, emit: Emit, partNo: string): void {
     emit({
       kind: "yesno",
       id: "order_part",
-      prompt: "安装中有任何问题可以直接问我。还需要订购这个零件吗?",
+      prompt: "Feel free to ask me anything about the installation. Would you also like to order this part?",
       partNo: part.part_no,
     });
   } else {
     emit({
       kind: "text",
-      text: `${part.name}(${partNo})暂时没有图文安装指南,您可以直接问我安装问题,我会从维修资料中帮您查找。`,
+      text: `${part.name} (${partNo}) doesn't have a step-by-step guide yet, but you can ask me installation questions and I'll search our repair materials.`,
     });
     s.stage = "install_qa";
   }
@@ -324,17 +330,17 @@ async function handleFaultDesc(s: Session, emit: Emit, text: string): Promise<vo
     emitPartCards(s, emit, parts);
     emit({
       kind: "text",
-      text: "确认需要后点击卡片上的「加入购物车」即可。还有其他症状也可以继续描述。",
+      text: "Once you've confirmed a part, tap “Add to Cart” on its card. You can also keep describing other symptoms.",
     });
   } else {
     emit({
       kind: "text",
-      text: "根据您的描述暂时定位不到需要更换的零件。可以补充更多细节,或者换一种说法描述故障。",
+      text: "I couldn't pinpoint a replacement part from that description. Could you add a bit more detail or describe it differently?",
     });
   }
 }
 
-/** 状态机主入口 */
+/** State machine entry point */
 export async function handleEvent(
   s: Session,
   ev: ClientEvent,
@@ -345,7 +351,7 @@ export async function handleEvent(
       const appliances = getAppliances(s.userId);
       emit({
         kind: "text",
-        text: "👋 您好!我是 PartSelect 配件助手,可以帮您诊断冰箱/洗碗机故障、查找和订购零件、指导安装。",
+        text: "👋 Hi! I'm the PartSelect assistant. I can diagnose refrigerator and dishwasher problems, find the right parts, check compatibility, guide installation, and take your order.",
       });
       if (appliances.length > 0) {
         emit({
@@ -355,7 +361,7 @@ export async function handleEvent(
             applianceType: a.appliance_type, name: a.name, source: a.source,
           })),
         });
-        emit({ kind: "text", text: "点击选择您的家电,或直接在下方输入问题:" });
+        emit({ kind: "text", text: "Pick your appliance, or just type your question below:" });
       }
       emit({ kind: "menu" });
       s.stage = "menu";
@@ -369,7 +375,7 @@ export async function handleEvent(
         s.applianceType = m.appliance_type;
         emit({
           kind: "text",
-          text: `✓ 已选择:${m.brand} ${m.model_no}${m.name ? `(${m.name})` : ""}。请问需要什么帮助?`,
+          text: `✓ Selected: ${m.brand} ${m.model_no}${m.name ? ` (${m.name})` : ""}. How can I help?`,
         });
       }
       emit({ kind: "menu" });
@@ -384,7 +390,7 @@ export async function handleEvent(
           s.stage = "await_model";
           emit({
             kind: "text",
-            text: "请告诉我您的家电型号(机身铭牌上,比如 WDT780SAEM1):",
+            text: "What's your appliance's model number? (on the nameplate — e.g. WDT780SAEM1)",
           });
         } else {
           proceedAfterModel(s, emit);
@@ -393,20 +399,26 @@ export async function handleEvent(
         emit({
           kind: "yesno",
           id: "know_partno",
-          prompt: "您知道零件的 PartSelect 型号吗?(类似 PS11752778)",
+          prompt: "Do you know the PartSelect part number? (it looks like PS11752778)",
         });
       } else {
         // install
         s.stage = "install_pick";
         const purchased = getPurchasedParts(s.userId);
         if (purchased.length > 0) {
-          emit({ kind: "text", text: "请输入零件号,或直接选择您之前购买过的零件:" });
+          emit({
+            kind: "text",
+            text: "Enter the part number, or pick one of the parts you've bought before:",
+          });
           emit({
             kind: "purchased_part_chips",
             parts: purchased.map((p) => ({ partNo: p.part_no, name: p.name })),
           });
         } else {
-          emit({ kind: "text", text: "请输入零件号(如 PS11752778),我来调出安装指南:" });
+          emit({
+            kind: "text",
+            text: "Enter the part number (e.g. PS11752778) and I'll pull up the installation guide:",
+          });
         }
       }
       break;
@@ -416,12 +428,12 @@ export async function handleEvent(
       s.intent = "preorder";
       if (ev.value) {
         s.stage = "await_partno";
-        emit({ kind: "text", text: "请输入零件号(如 PS11752778):" });
+        emit({ kind: "text", text: "Please enter the part number (e.g. PS11752778):" });
       } else if (!s.modelNo) {
         s.stage = "await_model";
         emit({
           kind: "text",
-          text: "没关系。请先告诉我您的家电型号(机身铭牌上),我根据描述帮您找:",
+          text: "No problem. First, what's your appliance's model number? (on the nameplate) Then describe the part and I'll find it:",
         });
       } else {
         proceedAfterModel(s, emit);
@@ -452,12 +464,15 @@ export async function handleEvent(
     case "add_to_cart": {
       const r = addToCart(s.userId, ev.partNo, ev.qty ?? 1);
       if (r.ok) {
-        emit({ kind: "text", text: "✅ 已加入购物车。" });
+        emit({ kind: "text", text: "✅ Added to cart." });
         emit({ kind: "cart", cart: cartView(s.userId) });
       } else if (r.reason === "out_of_stock") {
-        emit({ kind: "text", text: "该零件已经没有库存,暂时无法订购。" });
+        emit({
+          kind: "text",
+          text: "This part is currently out of stock and can't be ordered right now.",
+        });
       } else if (r.reason === "insufficient_stock") {
-        emit({ kind: "text", text: "库存不足,无法再增加数量。" });
+        emit({ kind: "text", text: "Not enough stock to add more of this item." });
       } else {
         emit({ kind: "text", text: APOLOGY });
       }
@@ -479,10 +494,13 @@ export async function handleEvent(
       if (s.stage !== "awaiting_confirm") break;
       if (ev.value) {
         s.stage = "await_address";
-        emit({ kind: "text", text: "请填写收货地址:" });
+        emit({ kind: "text", text: "Please enter your shipping address:" });
         emit({ kind: "address_form", saved: getSavedAddress(s.userId) as never });
       } else {
-        emit({ kind: "text", text: "好的,订单未提交。您可以继续挑选或修改购物车。" });
+        emit({
+          kind: "text",
+          text: "No problem — the order wasn't placed. Feel free to keep shopping or adjust your cart.",
+        });
         backToMenu(s, emit);
       }
       break;
@@ -495,7 +513,7 @@ export async function handleEvent(
       const cart = cartView(s.userId);
       emit({
         kind: "text",
-        text: "地址已保存。最后一步,请输入支付卡号(演示环境:任意能通过校验的 Visa 卡号即可,如 4242 4242 4242 4242):",
+        text: "Address saved. Last step — enter your card number (demo environment: any Visa number that passes validation works, e.g. 4242 4242 4242 4242):",
       });
       emit({ kind: "payment_form", total: cart.total });
       break;
@@ -506,7 +524,10 @@ export async function handleEvent(
       const cart = cartView(s.userId);
       const pay = charge(ev.cardNo, cart.total);
       if (!pay.ok) {
-        emit({ kind: "text", text: `❌ 支付失败:${pay.reason}。请重新输入卡号:` });
+        emit({
+          kind: "text",
+          text: `❌ Payment failed: ${pay.reason}. Please re-enter your card number:`,
+        });
         emit({ kind: "payment_form", total: cart.total });
         break;
       }
@@ -514,8 +535,8 @@ export async function handleEvent(
       if (!order.ok) {
         const msg =
           order.reason === "insufficient_stock"
-            ? `很抱歉,以下零件刚刚被买完了:${(order.outOfStock ?? []).join(", ")}。订单未提交,请调整购物车。`
-            : "订单提交失败,请重试。";
+            ? `Sorry — these parts just sold out: ${(order.outOfStock ?? []).join(", ")}. Your order was not placed; please adjust your cart.`
+            : "We couldn't place your order. Please try again.";
         emit({ kind: "text", text: msg });
         backToMenu(s, emit);
         break;
@@ -529,7 +550,7 @@ export async function handleEvent(
       });
       emit({
         kind: "text",
-        text: `🎉 订单 #${order.orderId} 已确认,合计 $${order.total.toFixed(2)}(尾号 ${pay.last4})。零件将尽快发出,您可以随时回来问我订单状态或安装方法。`,
+        text: `🎉 Order #${order.orderId} confirmed — $${order.total.toFixed(2)} charged to Visa ending ${pay.last4}. Your parts will ship soon. Come back anytime to check order status or get installation help.`,
       });
       s.pendingAddress = undefined;
       backToMenu(s, emit);
@@ -541,7 +562,10 @@ export async function handleEvent(
         const part = getPartByNo(ev.partNo);
         if (part) emitPartCards(s, emit, [part]);
       } else {
-        emit({ kind: "text", text: "好的,祝您安装顺利!有问题随时回来找我。" });
+        emit({
+          kind: "text",
+          text: "Alright — good luck with the installation! Come back anytime if you need help.",
+        });
         backToMenu(s, emit);
       }
       break;
@@ -573,7 +597,7 @@ export async function handleEvent(
         case "await_part_desc": {
           pushHistory(s, "user", text);
           recordSearch(s.userId, text, s.modelNo);
-          // 先确定性精确搜索(零 token),无果才进 Agent
+          // Deterministic search first (zero tokens); the agent only runs if it finds nothing
           const hits = searchParts({
             query: text,
             applianceType: s.applianceType,
@@ -581,9 +605,12 @@ export async function handleEvent(
             limit: 3,
           });
           if (hits.length > 0) {
-            emit({ kind: "text", text: "为您找到以下匹配零件:" });
+            emit({ kind: "text", text: "Here's what matches your description:" });
             emitPartCards(s, emit, hits);
-            emit({ kind: "text", text: "确认后点击「加入购物车」,或继续描述其他零件。" });
+            emit({
+              kind: "text",
+              text: "Tap “Add to Cart” to confirm, or keep describing other parts you need.",
+            });
           } else {
             const partNos = await agentMatchParts(s, text, emit);
             const parts = partNos.map((no) => getPartByNo(no)).filter((p): p is Part => !!p);
@@ -606,7 +633,8 @@ export async function handleEvent(
           break;
         }
         case "install_qa": {
-          // 兼容性/零件号等确定性捷径优先,纯安装追问才进 Agent
+          // Deterministic shortcuts (part numbers, compatibility) take priority;
+          // pure installation questions fall through to the agent
           await routeFreeText(s, emit, text);
           break;
         }
@@ -615,7 +643,7 @@ export async function handleEvent(
         case "awaiting_confirm": {
           emit({
             kind: "text",
-            text: "请先完成上方的当前步骤;想取消可以点「返回主菜单」。",
+            text: "Please finish the current step above first — or cancel it to go back to the menu.",
           });
           break;
         }

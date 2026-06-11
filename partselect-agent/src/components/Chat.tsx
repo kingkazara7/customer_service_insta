@@ -17,9 +17,9 @@ type FeedItem = NewFeedItem & { id: number };
 let nextId = 1;
 
 const YESNO_LABELS: Record<string, [string, string]> = {
-  know_partno: ["知道零件号", "不知道"],
-  confirm_order: ["✓ 确认下单", "再想想"],
-  order_part: ["需要订购", "暂不需要"],
+  know_partno: ["I know the part number", "I don't know it"],
+  confirm_order: ["✓ Place order", "Not yet"],
+  order_part: ["Yes, order it", "No thanks"],
 };
 
 export default function Chat() {
@@ -67,7 +67,7 @@ export default function Chat() {
               setCart({ items: [], total: 0, count: 0 });
             }
             if (sev.kind === "agent_delta") {
-              // 流式 LLM 文本合并进同一个气泡
+              // merge streamed LLM text into a single bubble
               if (agentBubbleId === null) {
                 agentBubbleId = nextId++;
                 setFeed((f) => [
@@ -92,7 +92,7 @@ export default function Chat() {
         }
       } catch (err) {
         console.error(err);
-        append({ type: "bot", text: "网络出了点问题,请重试。" });
+        append({ type: "bot", text: "Something went wrong — please try again." });
       } finally {
         setBusy(false);
       }
@@ -130,7 +130,7 @@ export default function Chat() {
         return (
           <ApplianceCards
             appliances={ev.appliances}
-            onSelect={(m) => userEcho(`我的家电:${m}`, { type: "select_appliance", modelNo: m })}
+            onSelect={(m) => userEcho(`My appliance: ${m}`, { type: "select_appliance", modelNo: m })}
           />
         );
       case "menu":
@@ -138,13 +138,13 @@ export default function Chat() {
           <MenuButtons
             onChoice={(c) => {
               const label =
-                c === "broken" ? "🔧 家电损坏了" : c === "preorder" ? "🛒 预购替换零件" : "📦 如何安装我的部件";
+                c === "broken" ? "🔧 My appliance is broken" : c === "preorder" ? "🛒 Order a replacement part" : "📦 How to install my part";
               userEcho(label, { type: "menu_choice", choice: c });
             }}
           />
         );
       case "yesno": {
-        const [yes, no] = YESNO_LABELS[ev.id] ?? ["是", "否"];
+        const [yes, no] = YESNO_LABELS[ev.id] ?? ["Yes", "No"];
         return (
           <YesNoButtons
             prompt={ev.prompt}
@@ -166,7 +166,7 @@ export default function Chat() {
         return (
           <PartCards
             parts={ev.parts}
-            onAdd={(no) => userEcho(`加入购物车:${no}`, { type: "add_to_cart", partNo: no })}
+            onAdd={(no) => userEcho(`Add to cart: ${no}`, { type: "add_to_cart", partNo: no })}
           />
         );
       case "model_chips":
@@ -177,7 +177,7 @@ export default function Chat() {
               label: `${m.brand} ${m.modelNo}`,
             }))}
             onPick={(id) => userEcho(id, { type: "select_model", modelNo: id })}
-            onNone={() => userEcho("都不是", { type: "none_of_these" })}
+            onNone={() => userEcho("None of these", { type: "none_of_these" })}
           />
         );
       case "part_chips":
@@ -185,7 +185,7 @@ export default function Chat() {
           <Chips
             items={ev.parts.map((p) => ({ id: p.partNo, label: `${p.partNo} ${p.name}` }))}
             onPick={(id) => userEcho(id, { type: "select_part", partNo: id })}
-            onNone={() => userEcho("都不是", { type: "none_of_these" })}
+            onNone={() => userEcho("None of these", { type: "none_of_these" })}
           />
         );
       case "purchased_part_chips":
@@ -201,18 +201,18 @@ export default function Chat() {
         return (
           <CartBox
             cart={ev.cart}
-            onRemove={(no) => userEcho(`移除:${no}`, { type: "remove_from_cart", partNo: no })}
-            onCheckout={() => userEcho("去结算", { type: "checkout" })}
+            onRemove={(no) => userEcho(`Remove: ${no}`, { type: "remove_from_cart", partNo: no })}
+            onCheckout={() => userEcho("Checkout", { type: "checkout" })}
           />
         );
       case "order_summary":
-        return <CartBox cart={ev.cart} title={`📋 订单摘要${ev.modelNo ? `(${ev.modelNo})` : ""}`} />;
+        return <CartBox cart={ev.cart} title={`📋 Order summary${ev.modelNo ? ` (${ev.modelNo})` : ""}`} />;
       case "address_form":
         return (
           <AddressForm
             saved={ev.saved}
             onSubmit={(a) =>
-              userEcho(`地址:${a.line1}, ${a.city}`, { type: "submit_address", address: a })
+              userEcho(`Ship to: ${a.line1}, ${a.city}`, { type: "submit_address", address: a })
             }
           />
         );
@@ -221,7 +221,7 @@ export default function Chat() {
           <PaymentForm
             total={ev.total}
             onSubmit={(card) =>
-              userEcho(`支付卡号 **** ${card.replace(/\D/g, "").slice(-4)}`, {
+              userEcho(`Paying with card **** ${card.replace(/\D/g, "").slice(-4)}`, {
                 type: "submit_payment",
                 cardNo: card,
               })
@@ -247,10 +247,10 @@ export default function Chat() {
       <header className="header">
         <div className="brand">
           <span className="logo">Part<em>Select</em></span>
-          <span className="tag">配件助手 · 冰箱 / 洗碗机</span>
+          <span className="tag">Parts Assistant · Refrigerators &amp; Dishwashers</span>
         </div>
         <button className="cartBtn" onClick={() => setDrawerOpen(true)}>
-          🛒 购物车
+          🛒 Cart
           {cart.count > 0 && <span className="badge">{cart.count}</span>}
         </button>
       </header>
@@ -285,26 +285,26 @@ export default function Chat() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submitText()}
-          placeholder="描述故障、输入零件号或型号…(如:制冰机不出冰 / PS11752778)"
+          placeholder="Describe the issue, or enter a part / model number… (e.g. ice maker not working / PS11752778)"
           disabled={busy}
         />
-        <button onClick={submitText} disabled={busy || !input.trim()}>发送</button>
+        <button onClick={submitText} disabled={busy || !input.trim()}>Send</button>
       </div>
 
       {drawerOpen && (
         <>
           <div className="drawerMask" onClick={() => setDrawerOpen(false)} />
           <div className="drawer">
-            <h3>🛒 购物车</h3>
+            <h3>🛒 Cart</h3>
             <CartBox
               cart={cart}
               onRemove={(no) => {
                 setDrawerOpen(false);
-                userEcho(`移除:${no}`, { type: "remove_from_cart", partNo: no });
+                userEcho(`Remove: ${no}`, { type: "remove_from_cart", partNo: no });
               }}
               onCheckout={() => {
                 setDrawerOpen(false);
-                userEcho("去结算", { type: "checkout" });
+                userEcho("Checkout", { type: "checkout" });
               }}
             />
           </div>

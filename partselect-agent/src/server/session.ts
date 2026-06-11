@@ -24,11 +24,12 @@ export type Session = {
   lastPartNos: string[];
   installPartNo?: string;
   pendingAddress?: Address;
-  /** 仅供 Agent 模糊节点使用的短历史,固定截断,控制 token */
+  /** Short history used only by the agent's fuzzy nodes; hard-capped to control tokens */
   history: { role: "user" | "assistant"; text: string }[];
 };
 
-// Next.js dev 热重载不清空 globalThis,会话得以保留;生产换 Redis 仅需改此文件
+// globalThis survives Next.js dev hot reloads, so sessions persist;
+// swapping to Redis in production only touches this file
 const store: Map<string, Session> =
   (globalThis as Record<string, unknown>).__psSessions as Map<string, Session> ??
   new Map();

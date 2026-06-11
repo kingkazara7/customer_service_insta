@@ -6,7 +6,7 @@ import type {
 } from "@/shared/protocol";
 
 const typeIcon = (t: string) => (t === "refrigerator" ? "🧊" : "🍽️");
-const typeName = (t: string) => (t === "refrigerator" ? "冰箱" : "洗碗机");
+const typeName = (t: string) => (t === "refrigerator" ? "refrigerator" : "dishwasher");
 
 export function ApplianceCards(props: {
   appliances: ApplianceCard[];
@@ -23,7 +23,7 @@ export function ApplianceCards(props: {
           <div className="icon">{typeIcon(a.applianceType)}</div>
           <div className="model">{a.brand} {a.modelNo}</div>
           {a.name && <div className="name">{a.name}</div>}
-          <span className="src">{a.source === "purchased" ? "✓ 已购家电" : "查询过"}</span>
+          <span className="src">{a.source === "purchased" ? "✓ Owned" : "Searched"}</span>
         </div>
       ))}
     </div>
@@ -35,9 +35,9 @@ export function MenuButtons(props: {
 }) {
   return (
     <div className="btnRow">
-      <button className="chip" onClick={() => props.onChoice("broken")}>🔧 家电损坏了</button>
-      <button className="chip" onClick={() => props.onChoice("preorder")}>🛒 预购替换零件</button>
-      <button className="chip" onClick={() => props.onChoice("install")}>📦 如何安装我的部件</button>
+      <button className="chip" onClick={() => props.onChoice("broken")}>🔧 My appliance is broken</button>
+      <button className="chip" onClick={() => props.onChoice("preorder")}>🛒 Order a replacement part</button>
+      <button className="chip" onClick={() => props.onChoice("install")}>📦 How to install my part</button>
     </div>
   );
 }
@@ -81,15 +81,15 @@ export function PartCards(props: {
               {p.productUrl
                 ? <a href={p.productUrl} target="_blank" rel="noreferrer">{p.partNo}</a>
                 : p.partNo}
-              {p.mfrPartNo && <> · 厂家号 {p.mfrPartNo}</>}
-              {p.brand && <> · {p.brand}{typeName(p.applianceType)}</>}
+              {p.mfrPartNo && <> · Mfr # {p.mfrPartNo}</>}
+              {p.brand && <> · {p.brand} {typeName(p.applianceType)}</>}
             </div>
             <div className="badges">
-              {p.outOfStock && <span className="badge2 out">该零件已无库存</span>}
-              {p.lowStock && <span className="badge2 low">仅剩 {p.stockQty} 件</span>}
-              {!p.outOfStock && !p.lowStock && <span className="badge2 stock">现货</span>}
-              {p.compatibleWithSessionModel === true && <span className="badge2 fit">✓ 适配您的型号</span>}
-              {p.compatibleWithSessionModel === false && <span className="badge2 nofit">✗ 不适配您的型号</span>}
+              {p.outOfStock && <span className="badge2 out">Out of stock</span>}
+              {p.lowStock && <span className="badge2 low">Only {p.stockQty} left</span>}
+              {!p.outOfStock && !p.lowStock && <span className="badge2 stock">In stock</span>}
+              {p.compatibleWithSessionModel === true && <span className="badge2 fit">✓ Fits your model</span>}
+              {p.compatibleWithSessionModel === false && <span className="badge2 nofit">✗ Doesn&apos;t fit your model</span>}
             </div>
           </div>
           <div className="pside">
@@ -99,7 +99,7 @@ export function PartCards(props: {
               disabled={p.outOfStock}
               onClick={() => props.onAdd(p.partNo)}
             >
-              {p.outOfStock ? "缺货" : "确认加入购物车"}
+              {p.outOfStock ? "Out of stock" : "Add to Cart"}
             </button>
           </div>
         </div>
@@ -127,32 +127,32 @@ export function Chips(props: {
         <button
           className="chip ghost" disabled={picked}
           onClick={() => { setPicked(true); props.onNone!(); }}
-        >{props.noneLabel ?? "都不是"}</button>
+        >{props.noneLabel ?? "None of these"}</button>
       )}
     </div>
   );
 }
 
 const DIFFICULTY: Record<string, string> = {
-  easy: "★☆☆ 简单", medium: "★★☆ 中等", hard: "★★★ 较难",
+  easy: "★☆☆ Easy", medium: "★★☆ Medium", hard: "★★★ Hard",
 };
 
 export function InstallCard(props: { guide: InstallGuideView }) {
   const g = props.guide;
   return (
     <div className="installCard">
-      <h4>🛠️ 安装指南:{g.partName}({g.partNo})</h4>
+      <h4>🛠️ Installation Guide: {g.partName} ({g.partNo})</h4>
       <div className="metaRow">
-        {g.difficulty && <span>难度 {DIFFICULTY[g.difficulty] ?? g.difficulty}</span>}
-        {g.estTimeMinutes != null && <span>⏱ 约 {g.estTimeMinutes} 分钟</span>}
-        {g.tools && <span>🔩 工具:{g.tools}</span>}
+        {g.difficulty && <span>Difficulty {DIFFICULTY[g.difficulty] ?? g.difficulty}</span>}
+        {g.estTimeMinutes != null && <span>⏱ About {g.estTimeMinutes} min</span>}
+        {g.tools && <span>🔩 Tools: {g.tools}</span>}
       </div>
       <ol>
         {g.steps.map((s, i) => <li key={i}>{s}</li>)}
       </ol>
       <div className="linkRow">
-        {g.videoUrl && <a href={g.videoUrl} target="_blank" rel="noreferrer">▶ 安装视频</a>}
-        {g.manualUrl && <a href={g.manualUrl} target="_blank" rel="noreferrer">📄 图文说明书</a>}
+        {g.videoUrl && <a href={g.videoUrl} target="_blank" rel="noreferrer">▶ Watch video</a>}
+        {g.manualUrl && <a href={g.manualUrl} target="_blank" rel="noreferrer">📄 Illustrated manual</a>}
       </div>
     </div>
   );
@@ -166,25 +166,25 @@ export function CartBox(props: {
 }) {
   const { cart } = props;
   if (cart.items.length === 0) {
-    return <div className="cartBox"><h4>🛒 购物车是空的</h4></div>;
+    return <div className="cartBox"><h4>🛒 Your cart is empty</h4></div>;
   }
   return (
     <div className="cartBox">
-      <h4>{props.title ?? "🛒 购物车"}</h4>
+      <h4>{props.title ?? "🛒 Cart"}</h4>
       {cart.items.map((i) => (
         <div className="cartLine" key={i.partNo}>
           <span>{i.name} × {i.qty}</span>
           <span>
             ${i.lineTotal.toFixed(2)}
             {props.onRemove && (
-              <button className="rm" onClick={() => props.onRemove!(i.partNo)}>移除</button>
+              <button className="rm" onClick={() => props.onRemove!(i.partNo)}>Remove</button>
             )}
           </span>
         </div>
       ))}
-      <div className="cartTotal"><span>合计</span><span>${cart.total.toFixed(2)}</span></div>
+      <div className="cartTotal"><span>Total</span><span>${cart.total.toFixed(2)}</span></div>
       {props.onCheckout && (
-        <button className="checkoutBtn" onClick={props.onCheckout}>去结算</button>
+        <button className="checkoutBtn" onClick={props.onCheckout}>Checkout</button>
       )}
     </div>
   );
@@ -204,24 +204,24 @@ export function AddressForm(props: {
   return (
     <div className="formBox">
       <div>
-        <label>收件人</label>
-        <input value={a.name} onChange={set("name")} placeholder="姓名" disabled={done} />
+        <label>Recipient</label>
+        <input value={a.name} onChange={set("name")} placeholder="Full name" disabled={done} />
       </div>
       <div>
-        <label>街道地址</label>
-        <input value={a.line1} onChange={set("line1")} placeholder="如 123 Main St, Apt 4" disabled={done} />
+        <label>Street address</label>
+        <input value={a.line1} onChange={set("line1")} placeholder="e.g. 123 Main St, Apt 4" disabled={done} />
       </div>
       <div className="formRow2">
         <div>
-          <label>城市</label>
+          <label>City</label>
           <input value={a.city} onChange={set("city")} disabled={done} />
         </div>
         <div>
-          <label>州</label>
+          <label>State</label>
           <input value={a.state} onChange={set("state")} placeholder="OH" disabled={done} />
         </div>
         <div>
-          <label>邮编</label>
+          <label>ZIP</label>
           <input value={a.zip} onChange={set("zip")} placeholder="43004" disabled={done} />
         </div>
       </div>
@@ -229,7 +229,7 @@ export function AddressForm(props: {
         className="checkoutBtn" disabled={!ok || done}
         onClick={() => { setDone(true); props.onSubmit(a); }}
       >
-        {done ? "已提交" : "确认地址"}
+        {done ? "Submitted" : "Confirm address"}
       </button>
     </div>
   );
@@ -246,10 +246,10 @@ export function PaymentForm(props: {
   return (
     <div className="formBox">
       <div className="demoNote">
-        ⚠️ 演示环境:不会产生真实扣款。输入任意能通过校验的 Visa 卡号即可,例如 4242 4242 4242 4242。
+        ⚠️ Demo environment — no real charges. Enter any Visa number that passes validation, e.g. 4242 4242 4242 4242.
       </div>
       <div>
-        <label>Visa 卡号(应付 ${props.total.toFixed(2)})</label>
+        <label>Visa card number (total due ${props.total.toFixed(2)})</label>
         <input
           value={card}
           onChange={(e) => setCard(e.target.value)}
@@ -262,7 +262,7 @@ export function PaymentForm(props: {
         className="checkoutBtn" disabled={!ok || done}
         onClick={() => { setDone(true); props.onSubmit(card); }}
       >
-        {done ? "处理中…" : `支付 $${props.total.toFixed(2)}`}
+        {done ? "Processing…" : `Pay $${props.total.toFixed(2)}`}
       </button>
     </div>
   );
@@ -274,9 +274,9 @@ export function OrderConfirmed(props: {
   return (
     <div className="confirmBox">
       <div className="big">🎉</div>
-      <h3>订单已确认</h3>
-      <p>订单号 #{props.orderId} · 合计 ${props.total.toFixed(2)}</p>
-      <p>Visa 尾号 {props.last4} · 凭证 {props.receiptId}</p>
+      <h3>Order confirmed</h3>
+      <p>Order #{props.orderId} · Total ${props.total.toFixed(2)}</p>
+      <p>Visa ending {props.last4} · Receipt {props.receiptId}</p>
     </div>
   );
 }

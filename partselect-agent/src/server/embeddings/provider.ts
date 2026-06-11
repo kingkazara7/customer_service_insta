@@ -1,9 +1,10 @@
 /**
- * Embedding 提供商抽象:
- *  - bedrock: Amazon Titan Text Embeddings v2(1024 维,生产/EC2 推荐,IAM 角色授权)
- *  - local:   @xenova/transformers 本地模型(384 维,离线开发用,需额外安装依赖)
- *  - none:    不可用 → RAG 自动退回关键词检索
- * 通过环境变量 EMBEDDINGS_PROVIDER 选择;链接与元数据不参与嵌入,只嵌入正文文本。
+ * Embedding provider abstraction:
+ *  - bedrock: Amazon Titan Text Embeddings v2 (1024-dim; recommended in prod/EC2)
+ *  - local:   @xenova/transformers local model (384-dim; offline dev, optional dependency)
+ *  - none:    unavailable → RAG automatically falls back to keyword retrieval
+ * Selected via the EMBEDDINGS_PROVIDER env var. Only body text gets embedded —
+ * links and metadata stay as plain columns.
  */
 
 export interface EmbeddingProvider {
@@ -47,8 +48,8 @@ class LocalMiniLmProvider implements EmbeddingProvider {
 
   async embed(texts: string[]): Promise<number[][]> {
     if (!this.pipe) {
-      // 可选依赖:npm i @xenova/transformers 后即可离线使用。
-      // 变量化的模块名避免打包器在编译期解析这个未安装的包。
+      // Optional dependency: `npm i @xenova/transformers` enables offline embeddings.
+      // The computed module name keeps bundlers from resolving this uninstalled package.
       const modName = ["@xenova", "transformers"].join("/");
       const { pipeline } = await import(modName);
       this.pipe = await pipeline("feature-extraction", "Xenova/multilingual-e5-small");

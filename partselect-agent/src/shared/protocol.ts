@@ -1,4 +1,4 @@
-/** 前后端共享的消息协议:客户端事件 + 服务端 SSE 事件 */
+/** Message protocol shared by frontend and backend: client events + server SSE events */
 
 export type Address = {
   name: string;
@@ -43,10 +43,10 @@ export type PartCard = {
   applianceType: "refrigerator" | "dishwasher";
   price: number;
   stockQty: number;
-  lowStock: boolean;      // 0 < stock <= 5 → "仅剩 N 件"
-  outOfStock: boolean;    // "该零件已经没有库存"
+  lowStock: boolean;      // 0 < stock <= 5 → "Only N left"
+  outOfStock: boolean;    // "Out of stock"
   productUrl: string | null;
-  compatibleWithSessionModel: boolean | null; // null = 会话无型号上下文
+  compatibleWithSessionModel: boolean | null; // null = no model context in session
 };
 
 export type CartView = {

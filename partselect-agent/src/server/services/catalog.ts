@@ -51,7 +51,7 @@ export function getModelByNo(modelNo: string): ApplianceModel | undefined {
     .get(modelNo.trim()) as ApplianceModel | undefined;
 }
 
-/** M 模块:型号查不到时,按公共前缀递减做相近匹配 */
+/** M module: when a model isn't found, match close models by shrinking common prefix */
 export function findSimilarModels(modelNo: string, limit = 4): ApplianceModel[] {
   const db = getDb();
   const q = modelNo.trim().toUpperCase();
@@ -64,7 +64,7 @@ export function findSimilarModels(modelNo: string, limit = 4): ApplianceModel[] 
       .all(q.slice(0, len) + "%", limit) as ApplianceModel[];
     if (rows.length > 0) return rows;
   }
-  // 前缀完全不匹配时退化为包含匹配
+  // No prefix match at all → degrade to a contains match
   return db
     .prepare(
       `SELECT id, model_no, brand, appliance_type, name FROM appliance_models
@@ -73,7 +73,7 @@ export function findSimilarModels(modelNo: string, limit = 4): ApplianceModel[] 
     .all(`%${q.slice(0, 4)}%`, limit) as ApplianceModel[];
 }
 
-/** P 模块:零件号查不到时的相近匹配 */
+/** P module: close matches when a part number isn't found */
 export function findSimilarParts(partNo: string, limit = 4): Part[] {
   const db = getDb();
   const q = partNo.trim().toUpperCase();
@@ -128,30 +128,47 @@ export function getCompatibleModels(partNo: string): ApplianceModel[] {
     .all(partNo.trim()) as ApplianceModel[];
 }
 
+const STOPWORDS = new Set([
+  "the", "a", "an", "is", "are", "was", "were", "be", "been", "my", "our",
+  "your", "i", "it", "its", "of", "to", "for", "on", "in", "at", "with",
+  "and", "or", "do", "does", "did", "how", "can", "could", "would", "what",
+  "why", "when", "that", "this", "there", "have", "has", "had", "me", "we",
+  "you", "please", "help", "not", "no", "out",
+]);
+
 /**
- * 关键词抽取:ASCII 词保留原样;中文长词额外切成二元组(bigram),
- * 容忍"不工作了/不工作"这类自然语言变体。
+ * Keyword extraction tuned for natural-language queries:
+ * - adjacent-word phrases ("ice maker", "not working") for precision,
+ * - single non-stopword tokens for recall,
+ * - CJK tokens longer than 4 chars are split into bigrams (standard CJK search practice).
  */
 function extractTerms(query: string): string[] {
   const tokens = query
-    .split(/[\s,，、;；。?？!!]+/)
-    .map((t) => t.trim())
+    .toLowerCase()
+    .split(/[^a-z0-9一-鿿]+/i)
     .filter((t) => t.length >= 2);
   const terms: string[] = [];
+  for (let i = 0; i < tokens.length - 1; i++) {
+    // keep a phrase when at least one word carries meaning
+    if (!STOPWORDS.has(tokens[i]) || !STOPWORDS.has(tokens[i + 1])) {
+      terms.push(`${tokens[i]} ${tokens[i + 1]}`);
+    }
+  }
   for (const tok of tokens) {
     if (/[一-鿿]/.test(tok) && tok.length > 4) {
       for (let i = 0; i < tok.length - 1; i++) terms.push(tok.slice(i, i + 2));
-    } else {
+    } else if (!STOPWORDS.has(tok)) {
       terms.push(tok);
     }
   }
   const deduped = [...new Set(terms)].slice(0, 14);
-  return deduped.length > 0 ? deduped : [query.trim()];
+  return deduped.length > 0 ? deduped : [query.trim().toLowerCase()];
 }
 
 /**
- * 关键词搜索:按 名称/描述/症状 匹配,可选限定型号(只返回兼容件)。
- * 状态机与 Agent 共用;症状词命中加权排序。
+ * Keyword search over name/description/symptoms, optionally scoped to a model
+ * (returns compatible parts only). Shared by the state machine and the agent;
+ * symptom hits are weighted highest in the ranking.
  */
 export function searchParts(opts: {
   query: string;
@@ -188,7 +205,7 @@ export function searchParts(opts: {
   return db.prepare(sql).all(params) as Part[];
 }
 
-/** 某型号的全部兼容零件(预购分支"看看常用件"用) */
+/** All compatible parts for a model (used by the pre-order "browse popular parts" path) */
 export function getPartsForModel(modelNo: string, limit = 10): Part[] {
   return getDb()
     .prepare(
@@ -229,15 +246,15 @@ export type DocChunk = {
 };
 
 /**
- * RAG 检索。当前为关键词加权(symptom_tags 命中优先);
- * embedding 管道就绪后由向量相似度替换,接口不变。
+ * Keyword RAG retrieval (symptom_tags hits weighted highest). The vector path
+ * in rag.ts supersedes this when embeddings are present; same interface.
  */
 export function searchDocChunks(opts: {
   query: string;
   applianceType?: "refrigerator" | "dishwasher";
   partNo?: string;
   limit?: number;
-  /** bigram 噪声门槛:真实症状命中通常 ≥6 分,随机文本 ≤2 分 */
+  /** Noise threshold: genuine symptom matches usually score ≥6, random text ≤2 */
   minScore?: number;
 }): DocChunk[] {
   const db = getDb();

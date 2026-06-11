@@ -72,8 +72,9 @@ export type OrderResult =
   | { ok: false; reason: string; outOfStock?: string[] };
 
 /**
- * 下单事务:校验库存 → 扣减库存 → 写订单 → 清空购物车 → 家电档案标记已购。
- * 库存扣减与校验同一事务,防超卖。
+ * Order transaction: validate stock → decrement stock → write order →
+ * clear cart → mark the session appliance as owned. Stock validation and
+ * decrement run in the same transaction to prevent overselling.
  */
 export function createOrder(
   userId: number,
@@ -120,7 +121,8 @@ export function createOrder(
   });
 
   const result = run();
-  // 会话中确认过的型号在购买后升级为"已购家电"(反哺卡片视图)
+  // After purchase, the model confirmed in this session becomes an "owned"
+  // appliance, which feeds the appliance-card view next time
   if (result.ok && sessionModelNo) upsertAppliance(userId, sessionModelNo, "purchased");
   return result;
 }

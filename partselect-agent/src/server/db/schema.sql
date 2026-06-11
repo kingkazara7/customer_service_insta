@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS parts (
   appliance_type TEXT NOT NULL CHECK (appliance_type IN ('refrigerator','dishwasher')),
   brand TEXT,
   price REAL NOT NULL,
-  stock_qty INTEGER NOT NULL DEFAULT 0,    -- 库存量;0 = 无库存
+  stock_qty INTEGER NOT NULL DEFAULT 0,    -- stock quantity; 0 = out of stock
   image_url TEXT,
   product_url TEXT,
   symptoms TEXT                            -- comma-separated symptoms this part fixes

@@ -7,8 +7,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * 聊天端点:每个请求一轮(事件进 → SSE 事件流出)。
- * 会话 ID 通过响应头 x-session-id 下发,客户端后续请求带回。
+ * Chat endpoint: one turn per request (client event in → SSE event stream out).
+ * The session id is issued via the x-session-id response header and echoed
+ * back by the client on subsequent requests.
  */
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as {
@@ -27,7 +28,7 @@ export async function POST(req: NextRequest) {
         await handleEvent(session, body.event, emit);
       } catch (err) {
         console.error("chat handler error:", err);
-        emit({ kind: "text", text: "系统出了点问题,请重试。" });
+        emit({ kind: "text", text: "Something went wrong — please try again." });
         emit({ kind: "done" });
       } finally {
         controller.close();

@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PartSelect 配件助手 | 冰箱 & 洗碗机零件",
+  title: "PartSelect Parts Assistant | Refrigerator & Dishwasher Parts",
   description:
-    "PartSelect 智能客服:冰箱/洗碗机故障诊断、零件查询、兼容性确认、安装指导与订购。",
+    "PartSelect smart assistant: diagnose refrigerator and dishwasher problems, find parts, check compatibility, get installation guidance, and order — all in chat.",
 };
 
 export default function RootLayout({
@@ -13,7 +13,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN">
+    <html lang="en">
       <body>{children}</body>
     </html>
   );

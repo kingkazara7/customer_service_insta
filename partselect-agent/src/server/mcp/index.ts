@@ -8,9 +8,10 @@ import {
 import { getOrderStatus, getRecentOrders } from "../services/orders";
 
 /**
- * Agent 侧 MCP 工具 —— 全部只读。
- * 购物车/下单/支付等改写操作不暴露给 LLM,只能由状态机在用户点击确认后执行。
- * 返回值做了字段裁剪,控制回填进上下文的 token 量。
+ * Agent-facing MCP tools — all read-only.
+ * Write operations (cart, orders, payment) are never exposed to the LLM;
+ * they can only be triggered by explicit user confirmation in the state machine.
+ * Tool results are trimmed to a compact shape to limit context tokens.
  */
 
 function text(obj: unknown) {
@@ -25,7 +26,7 @@ function slimPart(p: Part) {
     brand: p.brand,
     appliance_type: p.appliance_type,
     price: p.price,
-    stock: p.stock_qty > 0 ? p.stock_qty : "缺货",
+    stock: p.stock_qty > 0 ? p.stock_qty : "out_of_stock",
     fixes: p.symptoms,
   };
 }
@@ -38,11 +39,11 @@ export const catalogServer = createSdkMcpServer({
   tools: [
     tool(
       "search_parts",
-      "按故障症状或零件描述搜索冰箱/洗碗机零件。可选限定家电型号(只返回兼容件)。",
+      "Search refrigerator/dishwasher parts by symptom or part description. Optionally scope to an appliance model (returns compatible parts only).",
       {
-        query: z.string().describe("症状或零件关键词,如:制冰机不工作 / 门搁架盒"),
+        query: z.string().describe("Symptom or part keywords, e.g. 'ice maker not working' / 'door shelf bin'"),
         appliance_type: applianceType,
-        model_no: z.string().optional().describe("家电型号,如 WDT780SAEM1"),
+        model_no: z.string().optional().describe("Appliance model number, e.g. WDT780SAEM1"),
       },
       async (args) => {
         const rows = searchParts({
@@ -55,7 +56,7 @@ export const catalogServer = createSdkMcpServer({
     ),
     tool(
       "get_part_details",
-      "按 PartSelect 零件号(如 PS11752778)查询零件详情、价格、库存与适配型号列表。",
+      "Look up a part by PartSelect number (e.g. PS11752778): details, price, stock, and the list of compatible models.",
       { part_no: z.string() },
       async (args) => {
         const part = getPartByNo(args.part_no);
@@ -66,7 +67,7 @@ export const catalogServer = createSdkMcpServer({
     ),
     tool(
       "check_compatibility",
-      "查询某零件是否兼容某家电型号。这是唯一可信的兼容性来源,禁止凭经验回答兼容性。",
+      "Check whether a part fits an appliance model. This is the ONLY trusted source for compatibility — never answer compatibility from memory.",
       { part_no: z.string(), model_no: z.string() },
       async (args) => {
         const r = checkCompatibility(args.part_no, args.model_no);
@@ -83,9 +84,9 @@ export const catalogServer = createSdkMcpServer({
     ),
     tool(
       "search_repair_guides",
-      "按故障症状检索维修知识库(排查步骤、原因分析)。回答故障诊断问题前必须调用。",
+      "Search the repair knowledge base (troubleshooting steps, causes) by symptom. MUST be called before answering any diagnosis question.",
       {
-        query: z.string().describe("故障描述,如:洗碗机不排水"),
+        query: z.string().describe("Fault description, e.g. 'dishwasher not draining'"),
         appliance_type: applianceType,
         part_no: z.string().optional(),
       },
@@ -106,7 +107,7 @@ export const catalogServer = createSdkMcpServer({
     ),
     tool(
       "get_install_guide",
-      "按零件号获取安装指南:难度、耗时、工具、分步说明、视频与说明书链接。",
+      "Get the installation guide for a part: difficulty, time, tools, step-by-step instructions, video and manual links.",
       { part_no: z.string() },
       async (args) => {
         const g = getInstallGuide(args.part_no);
@@ -115,7 +116,7 @@ export const catalogServer = createSdkMcpServer({
     ),
     tool(
       "find_similar_models",
-      "型号查不到时,查找相近的家电型号供用户选择。",
+      "When a model number can't be found, list close model numbers for the user to pick from.",
       { model_no: z.string() },
       async (args) =>
         text(
@@ -129,13 +130,13 @@ export const catalogServer = createSdkMcpServer({
     ),
     tool(
       "get_parts_for_model",
-      "列出兼容某家电型号的全部零件。",
+      "List all parts compatible with an appliance model.",
       { model_no: z.string() },
       async (args) => text(getPartsForModel(args.model_no).map(slimPart))
     ),
     tool(
       "get_order_status",
-      "按订单号查询当前用户的订单状态与明细。",
+      "Look up the status and line items of one of the current user's orders.",
       { order_id: z.number(), user_id: z.number() },
       async (args) => {
         const o = getOrderStatus(args.user_id, args.order_id);
@@ -144,7 +145,7 @@ export const catalogServer = createSdkMcpServer({
     ),
     tool(
       "get_recent_orders",
-      "查询当前用户最近的订单列表。",
+      "List the current user's recent orders.",
       { user_id: z.number() },
       async (args) => text(getRecentOrders(args.user_id))
     ),
