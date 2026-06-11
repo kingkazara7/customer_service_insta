@@ -73,6 +73,7 @@ function main() {
     }
 
     let upserted = 0, links = 0, guides = 0;
+    const processed = new Set<string>();
     for (const model of harvest.models) {
       const modelRow = db
         .prepare("SELECT id FROM appliance_models WHERE model_no = ?")
@@ -83,6 +84,7 @@ function main() {
       }
 
       for (const p of model.parts) {
+        processed.add(p.ps);
         const detail = harvest.details[p.ps];
         const existing = db
           .prepare("SELECT id, stock_qty FROM parts WHERE part_no = ?")
@@ -152,6 +154,52 @@ function main() {
         }
       }
     }
+    // Detail entries not present in any model listing (e.g. a part page that was
+    // harvested directly): update the existing part's fields and guide, but do
+    // not invent compatibility links we didn't observe.
+    for (const [ps, detail] of Object.entries(harvest.details)) {
+      if (processed.has(ps)) continue;
+      const existing = db
+        .prepare("SELECT id FROM parts WHERE part_no = ?")
+        .get(ps) as { id: number } | undefined;
+      if (!existing) continue;
+      db.prepare(
+        `UPDATE parts SET
+           price = COALESCE(?, price),
+           description = COALESCE(?, description),
+           symptoms = COALESCE(?, symptoms),
+           product_url = COALESCE(?, product_url)
+         WHERE id = ?`
+      ).run(
+        detail.price ?? null, detail.description ?? null, detail.symptoms ?? null,
+        detail.slug ? `https://www.partselect.com/${ps}-${detail.slug}.htm` : null,
+        existing.id
+      );
+      const existingGuide = db
+        .prepare("SELECT steps_json FROM install_guides WHERE part_id = ?")
+        .get(existing.id) as { steps_json: string } | undefined;
+      db.prepare(
+        `INSERT INTO install_guides (part_id, difficulty, est_time_minutes, tools, steps_json, video_url, manual_url)
+         VALUES (?,?,?,?,?,?,?)
+         ON CONFLICT(part_id) DO UPDATE SET
+           difficulty = excluded.difficulty,
+           est_time_minutes = excluded.est_time_minutes,
+           video_url = excluded.video_url`
+      ).run(
+        existing.id, DIFFICULTY[detail.difficulty] ?? "medium", minutes(detail.installTime),
+        "See video for required tools",
+        existingGuide?.steps_json ?? JSON.stringify([
+          "Disconnect power to the appliance",
+          "Remove the old part — the linked video shows the exact procedure",
+          "Install the new part and verify operation",
+        ]),
+        detail.videoUrl,
+        detail.slug ? `https://www.partselect.com/${ps}-${detail.slug}.htm` : null
+      );
+      upserted++; guides++;
+      console.log(`detail-only update: ${ps}`);
+    }
+
     console.log(`Ingest complete: ${upserted} parts upserted, ${links} compatibility links, ${guides} install guides enriched.`);
   });
   run();
