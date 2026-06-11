@@ -201,6 +201,21 @@ async function main() {
   );
   expect("offers cleaning supplies as purchasable parts", kinds(evs).includes("part_cards"));
 
+  // ── Scenario 10: vision (degraded path without Bedrock) ──
+  console.log("Scenario 10: photo upload (vision)");
+  const s10 = getSession().id;
+  await turn(s10, { type: "init" });
+  await identify(s10);
+  // 1x1 transparent PNG; with no Bedrock locally the agent degrades gracefully
+  const tinyPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+  evs = await turn(s10, { type: "submit_image", base64: tinyPng, format: "png" });
+  expect("acknowledges the photo", texts(evs).includes("photo"));
+  expect(
+    "degrades gracefully when vision unavailable (asks to type model)",
+    texts(evs).toLowerCase().includes("model number") || texts(evs).toLowerCase().includes("describe"),
+    texts(evs).slice(0, 200)
+  );
+
   console.log(failures === 0 ? "\nAll checks passed ✅" : `\n${failures} check(s) failed ❌`);
   process.exit(failures === 0 ? 0 : 1);
 }

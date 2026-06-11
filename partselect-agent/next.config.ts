@@ -6,6 +6,7 @@ const nextConfig: NextConfig = {
     "better-sqlite3",
     "@anthropic-ai/claude-agent-sdk",
     "@xenova/transformers",
+    "playwright-core",
   ],
 };
 

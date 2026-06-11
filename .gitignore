@@ -19,3 +19,6 @@ out/
 
 # deploy artifacts
 deploy.tar.gz
+
+sticker_test.jpg
+make_sticker.py

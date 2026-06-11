@@ -14,6 +14,7 @@ export type ClientEvent =
   | { type: "submit_email"; email: string }
   | { type: "continue_guest" }
   | { type: "text"; text: string }
+  | { type: "submit_image"; base64: string; format: "jpeg" | "png" | "gif" | "webp" }
   | { type: "select_appliance"; modelNo: string }
   | { type: "menu_choice"; choice: "broken" | "preorder" | "install" }
   | { type: "know_partno"; value: boolean }

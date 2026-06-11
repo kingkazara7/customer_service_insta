@@ -5,7 +5,9 @@ import { type Session, pushHistory } from "./session";
 import {
   getPartByNo, getModelByNo, findSimilarModels, findSimilarParts,
   checkCompatibility, searchParts, getInstallGuide, type Part,
+  ingestLivePart, ensureModel,
 } from "./services/catalog";
+import { fetchModel, fetchPart } from "./liveFetch";
 import {
   getCart, addToCart, removeFromCart, createOrder,
 } from "./services/orders";
@@ -16,6 +18,7 @@ import {
 } from "./services/users";
 import { charge } from "./services/payments";
 import { agentDiagnose, agentMatchParts, agentAnswer, type Emit } from "./agent";
+import { identifyImage } from "./vision";
 
 const PART_NO_RE = /PS\d{6,9}/i;
 // Appliance model pattern: letters followed by digits, 8-14 chars (e.g. WDT780SAEM1).
@@ -83,13 +86,15 @@ function emitPartCards(s: Session, emit: Emit, parts: Part[]): void {
 }
 
 /** P module: full lookup path for a part number */
-function lookupPartFlow(s: Session, emit: Emit, partNoInput: string): void {
+async function lookupPartFlow(s: Session, emit: Emit, partNoInput: string): Promise<void> {
   const part = getPartByNo(partNoInput);
   recordSearch(s.userId, partNoInput, s.modelNo, part?.part_no);
   if (part) {
     emitPartCards(s, emit, [part]);
     return;
   }
+  // Not in the local catalog → try a live fetch from partselect.com before giving up
+  if (await tryLivePart(s, emit, partNoInput)) return;
   const similar = findSimilarParts(partNoInput);
   if (similar.length > 0) {
     emit({
@@ -106,9 +111,54 @@ function lookupPartFlow(s: Session, emit: Emit, partNoInput: string): void {
   }
 }
 
+/** Live fallback for a part number: fetch from partselect, ingest, then show it. */
+async function tryLivePart(s: Session, emit: Emit, partNo: string): Promise<boolean> {
+  if (process.env.LIVE_FETCH !== "1") return false;
+  emit({ kind: "text", text: `Let me check PartSelect directly for ${partNo}…` });
+  const live = await fetchPart(partNo);
+  if (!live || !live.appliance_type) return false;
+  ingestLivePart({
+    part_no: live.ps, mfr_part_no: live.mfr, name: live.name,
+    description: live.description, appliance_type: live.appliance_type,
+    brand: null, price: live.price, stock: live.stock, product_url: live.url,
+    modelNo: s.modelNo,
+  });
+  const part = getPartByNo(live.ps);
+  if (!part) return false;
+  emit({ kind: "text", text: "Found it on PartSelect — added to our catalog:" });
+  emitPartCards(s, emit, [part]);
+  return true;
+}
+
+/** Live fallback for a model: fetch its parts catalog, ingest, then continue. */
+async function tryLiveModel(s: Session, emit: Emit, modelNo: string): Promise<boolean> {
+  if (process.env.LIVE_FETCH !== "1") return false;
+  emit({ kind: "text", text: `Let me check PartSelect directly for model ${modelNo}…` });
+  const live = await fetchModel(modelNo);
+  if (!live) return false;
+  ensureModel(live.modelNo, live.brand, live.appliance_type);
+  for (const p of live.parts) {
+    ingestLivePart({
+      part_no: p.ps, mfr_part_no: p.mfr, name: p.name,
+      appliance_type: live.appliance_type, brand: live.brand,
+      price: p.price, stock: p.stock,
+      product_url: `https://www.partselect.com/${p.ps}-${p.slug}.htm`,
+      modelNo: live.modelNo,
+    });
+  }
+  emit({
+    kind: "text",
+    text: `Found your ${live.brand} ${live.modelNo} on PartSelect and loaded ${live.parts.length} compatible parts.`,
+  });
+  return true;
+}
+
 /** M module: model lookup → found: continue by intent; not found: similar options; none → apology */
-function modelLookupFlow(s: Session, emit: Emit, modelInput: string): void {
-  const model = getModelByNo(modelInput);
+async function modelLookupFlow(s: Session, emit: Emit, modelInput: string): Promise<void> {
+  let model = getModelByNo(modelInput);
+  if (!model && (await tryLiveModel(s, emit, modelInput))) {
+    model = getModelByNo(modelInput);
+  }
   if (model) {
     s.modelNo = model.model_no;
     s.applianceType = model.appliance_type;
@@ -195,29 +245,29 @@ async function routeFreeText(s: Session, emit: Emit, text: string): Promise<void
   // Shortcut 1: part number + install intent → installation card
   if (partNoMatch && wantsInstall) {
     s.intent = "install";
-    showInstallGuide(s, emit, partNoMatch[0].toUpperCase());
+    await showInstallGuide(s, emit, partNoMatch[0].toUpperCase());
     return;
   }
   // Shortcut 2: part number + compatibility (model from message or session context)
   if (partNoMatch && wantsCompat) {
-    answerCompatibility(s, emit, partNoMatch[0].toUpperCase(), modelMatch?.[0]?.toUpperCase());
+    await answerCompatibility(s, emit, partNoMatch[0].toUpperCase(), modelMatch?.[0]?.toUpperCase());
     return;
   }
   // Shortcut 3: pronoun ("this part") + compatibility → most recently shown part
   if (!partNoMatch && wantsCompat && s.lastPartNos.length > 0) {
-    answerCompatibility(s, emit, s.lastPartNos[0], modelMatch?.[0]?.toUpperCase());
+    await answerCompatibility(s, emit, s.lastPartNos[0], modelMatch?.[0]?.toUpperCase());
     return;
   }
   // Shortcut 4: bare part number → part card
   if (partNoMatch) {
-    lookupPartFlow(s, emit, partNoMatch[0].toUpperCase());
+    await lookupPartFlow(s, emit, partNoMatch[0].toUpperCase());
     return;
   }
   // Shortcut 5: repair phrasing → broken branch (with model detection)
   if (wantsBroken) {
     s.intent = "broken";
     if (modelMatch) {
-      modelLookupFlow(s, emit, modelMatch[0].toUpperCase());
+      await modelLookupFlow(s, emit, modelMatch[0].toUpperCase());
     } else if (s.modelNo) {
       s.stage = "await_fault_desc";
       await handleFaultDesc(s, emit, text); // the message already contains the symptom
@@ -260,9 +310,9 @@ async function routeFreeText(s: Session, emit: Emit, text: string): Promise<void
   await agentAnswer(s, text, emit);
 }
 
-function answerCompatibility(
+async function answerCompatibility(
   s: Session, emit: Emit, partNo: string, modelNoArg?: string
-): void {
+): Promise<void> {
   const modelNo = modelNoArg ?? s.modelNo;
   if (!modelNo) {
     s.stage = "await_model";
@@ -277,12 +327,12 @@ function answerCompatibility(
   const r = checkCompatibility(partNo, modelNo);
   recordSearch(s.userId, `compat ${partNo} ${modelNo}`, modelNo, partNo);
   if (!r.partFound) {
-    lookupPartFlow(s, emit, partNo);
+    await lookupPartFlow(s, emit, partNo);
     return;
   }
   if (!r.modelFound) {
     s.intent = s.intent ?? "preorder";
-    modelLookupFlow(s, emit, modelNo);
+    await modelLookupFlow(s, emit, modelNo);
     return;
   }
   if (r.compatible) {
@@ -299,10 +349,10 @@ function answerCompatibility(
   }
 }
 
-function showInstallGuide(s: Session, emit: Emit, partNo: string): void {
+async function showInstallGuide(s: Session, emit: Emit, partNo: string): Promise<void> {
   const part = getPartByNo(partNo);
   if (!part) {
-    lookupPartFlow(s, emit, partNo);
+    await lookupPartFlow(s, emit, partNo);
     return;
   }
   const guide = getInstallGuide(partNo);
@@ -346,6 +396,54 @@ async function handleFaultDesc(s: Session, emit: Emit, text: string): Promise<vo
       text: "I couldn't pinpoint a replacement part from that description. Could you add a bit more detail or describe it differently?",
     });
   }
+}
+
+/**
+ * Vision entry: a customer photographed their model sticker or a broken part.
+ * Identify it, then route into the existing deterministic flows.
+ */
+async function handleImage(
+  s: Session, emit: Emit, base64: string, format: "jpeg" | "png" | "gif" | "webp"
+): Promise<void> {
+  emit({ kind: "text", text: "📷 Looking at your photo…" });
+  const result = await identifyImage({ base64, format });
+
+  if (result.kind === "model") {
+    emit({
+      kind: "text",
+      text: `I read the model number **${result.modelNo}** from your photo. Let me check it…`,
+    });
+    // Reuse the M-module: handles found / similar-options / apology
+    await modelLookupFlow(s, emit, result.modelNo);
+    return;
+  }
+
+  if (result.kind === "part") {
+    if (result.applianceType) s.applianceType = result.applianceType;
+    emit({
+      kind: "text",
+      text: `That looks like: **${result.description}**. Here's what I found${s.modelNo ? ` for your ${s.modelNo}` : ""}:`,
+    });
+    recordSearch(s.userId, `image: ${result.description}`, s.modelNo);
+    const hits = searchParts({
+      query: result.description,
+      applianceType: s.applianceType,
+      modelNo: s.modelNo,
+      limit: 4,
+    });
+    if (hits.length > 0) {
+      emitPartCards(s, emit, hits);
+    } else {
+      const partNos = await agentMatchParts(s, result.description, emit);
+      const parts = partNos.map((no) => getPartByNo(no)).filter((p): p is Part => !!p);
+      if (parts.length > 0) emitPartCards(s, emit, parts);
+      else emit({ kind: "text", text: "I recognized the part but couldn't match it in our catalog. Could you tell me your appliance's model number?" });
+    }
+    return;
+  }
+
+  // unclear
+  emit({ kind: "text", text: result.reason });
 }
 
 /** Post-identification home: personalized appliance cards + main menu */
@@ -471,6 +569,11 @@ export async function handleEvent(
       break;
     }
 
+    case "submit_image": {
+      await handleImage(s, emit, ev.base64, ev.format);
+      break;
+    }
+
     case "select_appliance": {
       const m = getModelByNo(ev.modelNo);
       if (m) {
@@ -548,15 +651,15 @@ export async function handleEvent(
     }
 
     case "select_model": {
-      modelLookupFlow(s, emit, ev.modelNo);
+      await modelLookupFlow(s, emit, ev.modelNo);
       break;
     }
 
     case "select_part": {
       if (s.intent === "install" || s.stage === "install_pick" || s.stage === "install_qa") {
-        showInstallGuide(s, emit, ev.partNo);
+        await showInstallGuide(s, emit, ev.partNo);
       } else {
-        lookupPartFlow(s, emit, ev.partNo);
+        await lookupPartFlow(s, emit, ev.partNo);
       }
       break;
     }
@@ -692,7 +795,7 @@ export async function handleEvent(
         }
         case "await_model": {
           const m = text.match(MODEL_NO_RE);
-          modelLookupFlow(s, emit, (m?.[0] ?? text).toUpperCase());
+          await modelLookupFlow(s, emit, (m?.[0] ?? text).toUpperCase());
           break;
         }
         case "await_fault_desc": {
@@ -701,7 +804,7 @@ export async function handleEvent(
         }
         case "await_partno": {
           const m = text.match(PART_NO_RE);
-          lookupPartFlow(s, emit, (m?.[0] ?? text).toUpperCase());
+          await lookupPartFlow(s, emit, (m?.[0] ?? text).toUpperCase());
           break;
         }
         case "await_part_desc": {
@@ -736,7 +839,7 @@ export async function handleEvent(
         case "install_pick": {
           const m = text.match(PART_NO_RE);
           if (m) {
-            showInstallGuide(s, emit, m[0].toUpperCase());
+            await showInstallGuide(s, emit, m[0].toUpperCase());
           } else {
             await agentAnswer(s, text, emit);
           }

@@ -31,6 +31,7 @@ export default function Chat() {
   const sessionIdRef = useRef<string | null>(null);
   const feedRef = useRef<HTMLDivElement>(null);
   const initedRef = useRef(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const append = useCallback((item: NewFeedItem) => {
     setFeed((f) => [...f, { ...item, id: nextId++ }]);
@@ -121,6 +122,37 @@ export default function Chat() {
   const userEcho = (label: string, ev: ClientEvent) => {
     append({ type: "user", text: label });
     void sendEvent(ev);
+  };
+
+  const onPickImage = (file: File) => {
+    if (busy) return;
+    if (!file.type.startsWith("image/")) {
+      append({ type: "bot", text: "Please upload an image file." });
+      return;
+    }
+    // Downscale to ≤1024px and re-encode as JPEG: smaller payload, faster vision call
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const max = 1024;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+      const base64 = dataUrl.split(",")[1];
+      append({ type: "user", text: "📷 (photo uploaded)" });
+      void sendEvent({ type: "submit_image", base64, format: "jpeg" });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      append({ type: "bot", text: "I couldn't read that image — please try another." });
+    };
+    img.src = url;
   };
 
   const renderEvent = (item: Extract<FeedItem, { type: "event" }>) => {
@@ -289,10 +321,27 @@ export default function Chat() {
 
       <div className="composer">
         <input
+          ref={fileRef}
+          type="file"
+          accept="image/jpeg,image/png,image/gif,image/webp"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onPickImage(f);
+            e.target.value = "";
+          }}
+        />
+        <button
+          className="camBtn"
+          title="Upload a photo of your model sticker or a part"
+          onClick={() => fileRef.current?.click()}
+          disabled={busy}
+        >📷</button>
+        <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && submitText()}
-          placeholder="Describe the issue, or enter a part / model number… (e.g. ice maker not working / PS11752778)"
+          placeholder="Describe the issue, enter a part / model number, or 📷 a photo…"
           disabled={busy}
         />
         <button onClick={submitText} disabled={busy || !input.trim()}>Send</button>

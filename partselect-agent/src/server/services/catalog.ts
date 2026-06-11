@@ -218,6 +218,77 @@ export function getPartsForModel(modelNo: string, limit = 10): Part[] {
     .all(modelNo.trim(), limit) as Part[];
 }
 
+/**
+ * Upsert a live-fetched part + its compatibility link. Used by the live
+ * fallback to grow the catalog at runtime. Returns the part_no on success.
+ */
+export function ingestLivePart(p: {
+  part_no: string;
+  mfr_part_no: string | null;
+  name: string;
+  description?: string | null;
+  appliance_type: "refrigerator" | "dishwasher";
+  brand: string | null;
+  price: number;
+  stock: string | null;
+  product_url?: string | null;
+  modelNo?: string;
+}): void {
+  const db = getDb();
+  const qty =
+    p.stock === "In Stock" ? 20
+    : p.stock === "Special Order" || p.stock === "On Order" ? 3
+    : 0;
+  const url = p.product_url ?? `https://www.partselect.com/${p.part_no}.htm`;
+  const existing = db
+    .prepare("SELECT id FROM parts WHERE part_no = ? COLLATE NOCASE")
+    .get(p.part_no) as { id: number } | undefined;
+  let partId: number;
+  if (existing) {
+    db.prepare(
+      `UPDATE parts SET mfr_part_no = ?, name = ?, price = ?, stock_qty = ?,
+         product_url = ?, appliance_type = ?, brand = ?,
+         description = COALESCE(?, description)
+       WHERE id = ?`
+    ).run(
+      p.mfr_part_no, p.name, p.price, qty, url, p.appliance_type, p.brand,
+      p.description ?? null, existing.id
+    );
+    partId = existing.id;
+  } else {
+    partId = Number(
+      db.prepare(
+        `INSERT INTO parts (part_no, mfr_part_no, name, description, appliance_type, brand, price, stock_qty, product_url)
+         VALUES (?,?,?,?,?,?,?,?,?)`
+      ).run(
+        p.part_no, p.mfr_part_no, p.name,
+        p.description ?? `Genuine ${p.brand ?? ""} ${p.name}.`.trim(),
+        p.appliance_type, p.brand, p.price, qty, url
+      ).lastInsertRowid
+    );
+  }
+  if (p.modelNo) {
+    const model = db
+      .prepare("SELECT id FROM appliance_models WHERE model_no = ? COLLATE NOCASE")
+      .get(p.modelNo) as { id: number } | undefined;
+    if (model) {
+      db.prepare("INSERT OR IGNORE INTO compatibility (part_id, model_id) VALUES (?,?)")
+        .run(partId, model.id);
+    }
+  }
+}
+
+/** Create a model row if it doesn't exist (live fallback for unknown models). */
+export function ensureModel(
+  modelNo: string, brand: string, applianceType: "refrigerator" | "dishwasher"
+): void {
+  getDb()
+    .prepare(
+      `INSERT OR IGNORE INTO appliance_models (model_no, brand, appliance_type) VALUES (?,?,?)`
+    )
+    .run(modelNo.trim().toUpperCase(), brand, applianceType);
+}
+
 export function getInstallGuide(partNo: string): InstallGuide | undefined {
   const row = getDb()
     .prepare(
