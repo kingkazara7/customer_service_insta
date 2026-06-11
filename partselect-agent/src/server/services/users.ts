@@ -4,15 +4,29 @@ import type { ApplianceModel } from "./catalog";
 export type UserAppliance = ApplianceModel & { source: "purchased" | "searched" };
 
 export function getOrCreateDemoUser(): number {
+  return getOrCreateUserByEmail("demo@example.com").id;
+}
+
+/**
+ * Email-based identification: returning customers get their purchase history
+ * (appliance cards, past parts, saved address); unknown emails get a fresh account.
+ * Demo-grade auth — production would add a verification step (magic link / OTP).
+ */
+export function getOrCreateUserByEmail(email: string): {
+  id: number;
+  isNew: boolean;
+  name: string | null;
+} {
   const db = getDb();
+  const normalized = email.trim().toLowerCase();
   const row = db
-    .prepare("SELECT id FROM users WHERE email = ?")
-    .get("demo@example.com") as { id: number } | undefined;
-  if (row) return row.id;
-  return Number(
-    db.prepare("INSERT INTO users (email, name) VALUES (?,?)")
-      .run("demo@example.com", "Demo User").lastInsertRowid
+    .prepare("SELECT id, name FROM users WHERE lower(email) = ?")
+    .get(normalized) as { id: number; name: string | null } | undefined;
+  if (row) return { id: row.id, isNew: false, name: row.name };
+  const id = Number(
+    db.prepare("INSERT INTO users (email) VALUES (?)").run(normalized).lastInsertRowid
   );
+  return { id, isNew: true, name: null };
 }
 
 /** Data source for the appliance-card view */

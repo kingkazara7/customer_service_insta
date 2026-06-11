@@ -8,6 +8,39 @@ import type {
 const typeIcon = (t: string) => (t === "refrigerator" ? "🧊" : "🍽️");
 const typeName = (t: string) => (t === "refrigerator" ? "refrigerator" : "dishwasher");
 
+export function EmailForm(props: { onSubmit: (email: string) => void }) {
+  const [email, setEmail] = useState("");
+  const [done, setDone] = useState(false);
+  const ok = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
+  const submit = () => {
+    if (!ok || done) return;
+    setDone(true);
+    props.onSubmit(email.trim());
+  };
+  return (
+    <div className="formBox">
+      <div>
+        <label>Email address</label>
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          placeholder="you@example.com"
+          disabled={done}
+          autoFocus
+        />
+      </div>
+      <div className="demoNote">
+        💡 Demo tip: try <b>demo@example.com</b> to see a returning customer with appliances and purchase history.
+      </div>
+      <button className="checkoutBtn" disabled={!ok || done} onClick={submit}>
+        {done ? "Looking up your account…" : "Continue"}
+      </button>
+    </div>
+  );
+}
+
 export function ApplianceCards(props: {
   appliances: ApplianceCard[];
   onSelect: (modelNo: string) => void;

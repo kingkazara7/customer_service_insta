@@ -11,6 +11,7 @@ export type Address = {
 
 export type ClientEvent =
   | { type: "init" }
+  | { type: "submit_email"; email: string }
   | { type: "text"; text: string }
   | { type: "select_appliance"; modelNo: string }
   | { type: "menu_choice"; choice: "broken" | "preorder" | "install" }
@@ -69,6 +70,7 @@ export type InstallGuideView = {
 export type ServerEvent =
   | { kind: "text"; text: string }
   | { kind: "agent_delta"; text: string }
+  | { kind: "email_form" }
   | { kind: "appliance_cards"; appliances: ApplianceCard[] }
   | { kind: "menu" }
   | {

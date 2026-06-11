@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ClientEvent, ServerEvent, CartView } from "@/shared/protocol";
 import {
   ApplianceCards, MenuButtons, YesNoButtons, PartCards, Chips,
-  InstallCard, CartBox, AddressForm, PaymentForm, OrderConfirmed,
+  InstallCard, CartBox, AddressForm, PaymentForm, OrderConfirmed, EmailForm,
 } from "./Cards";
 
 type NewFeedItem =
@@ -126,6 +126,12 @@ export default function Chat() {
   const renderEvent = (item: Extract<FeedItem, { type: "event" }>) => {
     const ev = item.ev;
     switch (ev.kind) {
+      case "email_form":
+        return (
+          <EmailForm
+            onSubmit={(email) => userEcho(email, { type: "submit_email", email })}
+          />
+        );
       case "appliance_cards":
         return (
           <ApplianceCards

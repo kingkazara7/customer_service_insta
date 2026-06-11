@@ -2,8 +2,8 @@
 const { BedrockRuntimeClient, ConverseCommand } = require("@aws-sdk/client-bedrock-runtime");
 
 const ids = [
-  "us.anthropic.claude-sonnet-4-6",
-  "us.anthropic.claude-opus-4-8",
+  "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+  "us.anthropic.claude-haiku-4-5-20251001-v1:0",
 ];
 
 (async () => {

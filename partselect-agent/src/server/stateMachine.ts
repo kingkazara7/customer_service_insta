@@ -11,6 +11,7 @@ import {
 } from "./services/orders";
 import {
   getAppliances, getPurchasedParts, getSavedAddress, recordSearch,
+  getOrCreateUserByEmail,
 } from "./services/users";
 import { charge } from "./services/payments";
 import { agentDiagnose, agentMatchParts, agentAnswer, type Emit } from "./agent";
@@ -21,6 +22,7 @@ const PART_NO_RE = /PS\d{6,9}/i;
 const MODEL_NO_RE = /\b(?!PS\d)[A-Z]{2,4}\d{3}[A-Z0-9]{2,9}\b/i;
 
 const APOLOGY = "Sorry, we couldn't find the part you're looking for.";
+const EMAIL_RE = /[^\s@]+@[^\s@]+\.[^\s@]{2,}/;
 
 function applianceTypeName(t: string): string {
   return t === "refrigerator" ? "refrigerator" : "dishwasher";
@@ -340,31 +342,88 @@ async function handleFaultDesc(s: Session, emit: Emit, text: string): Promise<vo
   }
 }
 
+/** Post-identification home: personalized appliance cards + main menu */
+function emitHome(s: Session, emit: Emit): void {
+  const appliances = getAppliances(s.userId);
+  if (appliances.length > 0) {
+    emit({
+      kind: "appliance_cards",
+      appliances: appliances.map((a) => ({
+        modelNo: a.model_no, brand: a.brand,
+        applianceType: a.appliance_type, name: a.name, source: a.source,
+      })),
+    });
+    emit({ kind: "text", text: "Pick your appliance, or just type your question below:" });
+  }
+  emit({ kind: "menu" });
+  s.stage = "menu";
+}
+
+/** Email gate: look up the account (and its purchase history) by email, or create one */
+function identifyUser(s: Session, emit: Emit, emailRaw: string): void {
+  const match = emailRaw.match(EMAIL_RE);
+  if (!match) {
+    emit({
+      kind: "text",
+      text: "That doesn't look like a valid email address — please try again:",
+    });
+    emit({ kind: "email_form" });
+    s.stage = "await_email";
+    return;
+  }
+  const user = getOrCreateUserByEmail(match[0]);
+  s.userId = user.id;
+  if (user.isNew) {
+    emit({
+      kind: "text",
+      text: `✓ Account created for ${match[0].toLowerCase()}. Welcome to PartSelect! How can I help you today?`,
+    });
+  } else {
+    emit({
+      kind: "text",
+      text: `👋 Welcome back${user.name ? `, ${user.name}` : ""}! I've loaded your purchase history.`,
+    });
+  }
+  emitHome(s, emit);
+}
+
 /** State machine entry point */
 export async function handleEvent(
   s: Session,
   ev: ClientEvent,
   emit: Emit
 ): Promise<void> {
+  // Identity gate: everything except init / email submission requires a known user,
+  // because carts, orders, and history are all keyed by the account
+  if (
+    s.userId === 0 &&
+    ev.type !== "init" &&
+    ev.type !== "submit_email" &&
+    !(ev.type === "text" && s.stage === "await_email")
+  ) {
+    emit({ kind: "text", text: "Please enter your email first so I can pull up your account:" });
+    emit({ kind: "email_form" });
+    emit({ kind: "done" });
+    return;
+  }
+
   switch (ev.type) {
     case "init": {
-      const appliances = getAppliances(s.userId);
       emit({
         kind: "text",
         text: "👋 Hi! I'm the PartSelect assistant. I can diagnose refrigerator and dishwasher problems, find the right parts, check compatibility, guide installation, and take your order.",
       });
-      if (appliances.length > 0) {
-        emit({
-          kind: "appliance_cards",
-          appliances: appliances.map((a) => ({
-            modelNo: a.model_no, brand: a.brand,
-            applianceType: a.appliance_type, name: a.name, source: a.source,
-          })),
-        });
-        emit({ kind: "text", text: "Pick your appliance, or just type your question below:" });
-      }
-      emit({ kind: "menu" });
-      s.stage = "menu";
+      emit({
+        kind: "text",
+        text: "First, what's your email address? I'll use it to look up your appliances and order history.",
+      });
+      emit({ kind: "email_form" });
+      s.stage = "await_email";
+      break;
+    }
+
+    case "submit_email": {
+      identifyUser(s, emit, ev.email);
       break;
     }
 
@@ -580,6 +639,10 @@ export async function handleEvent(
       const text = ev.text.trim();
       if (!text) break;
       switch (s.stage) {
+        case "await_email": {
+          identifyUser(s, emit, text);
+          break;
+        }
         case "await_model": {
           const m = text.match(MODEL_NO_RE);
           modelLookupFlow(s, emit, (m?.[0] ?? text).toUpperCase());

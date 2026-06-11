@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Address } from "@/shared/protocol";
-import { getOrCreateDemoUser } from "./services/users";
 
 export type Stage =
+  | "await_email"
   | "menu"
   | "await_model"
   | "await_fault_desc"
@@ -16,6 +16,7 @@ export type Stage =
 
 export type Session = {
   id: string;
+  /** 0 = not identified yet (real user ids start at 1) */
   userId: number;
   stage: Stage;
   intent?: "broken" | "preorder" | "install";
@@ -42,8 +43,8 @@ export function getSession(id?: string): Session {
   }
   const session: Session = {
     id: id ?? randomUUID(),
-    userId: getOrCreateDemoUser(),
-    stage: "menu",
+    userId: 0,
+    stage: "await_email",
     lastPartNos: [],
     history: [],
   };

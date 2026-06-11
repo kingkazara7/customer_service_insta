@@ -28,13 +28,37 @@ function texts(evs: ServerEvent[]) {
     .join("\n");
 }
 
+async function identify(sessionId: string, email = "demo@example.com") {
+  return turn(sessionId, { type: "submit_email", email });
+}
+
 async function main() {
+  // ── Scenario 0: email identity gate ──
+  console.log("Scenario 0: email identity gate");
+  const s0 = getSession().id;
+  let evs = await turn(s0, { type: "init" });
+  expect("init asks for email", kinds(evs).includes("email_form"));
+  evs = await turn(s0, { type: "menu_choice", choice: "broken" });
+  expect("actions before identification are blocked", kinds(evs).includes("email_form"));
+  evs = await turn(s0, { type: "submit_email", email: "not-an-email" });
+  expect("invalid email is rejected", texts(evs).includes("valid email"));
+  evs = await turn(s0, { type: "submit_email", email: "newcustomer@test.com" });
+  expect("new email creates a fresh account", texts(evs).includes("Account created"));
+  expect("fresh account has no appliance cards", !kinds(evs).includes("appliance_cards"));
+  const s0b = getSession().id;
+  await turn(s0b, { type: "init" });
+  evs = await identify(s0b);
+  expect("returning email is welcomed back", texts(evs).includes("Welcome back"));
+  expect("returning email loads appliance cards", kinds(evs).includes("appliance_cards"));
+
   // ── Scenario 1: full purchase flow (broken-appliance branch) ──
   console.log("Scenario 1: broken appliance → diagnose → add to cart → checkout → pay");
   const s1 = getSession().id;
-  let evs = await turn(s1, { type: "init" });
-  expect("init returns appliance cards", kinds(evs).includes("appliance_cards"));
-  expect("init returns the main menu", kinds(evs).includes("menu"));
+  evs = await turn(s1, { type: "init" });
+  expect("init returns the email form", kinds(evs).includes("email_form"));
+  evs = await identify(s1);
+  expect("identification returns appliance cards", kinds(evs).includes("appliance_cards"));
+  expect("identification returns the main menu", kinds(evs).includes("menu"));
 
   evs = await turn(s1, { type: "select_appliance", modelNo: "WRS325SDHZ01" });
   expect("appliance selection returns to menu", kinds(evs).includes("menu"));
@@ -76,6 +100,7 @@ async function main() {
   console.log("Scenario 2: similar-model matching");
   const s2 = getSession().id;
   await turn(s2, { type: "init" });
+  await identify(s2);
   await turn(s2, { type: "menu_choice", choice: "broken" });
   evs = await turn(s2, { type: "text", text: "My model is WDT780SAEM9" });
   expect("model not found → notice + similar options", texts(evs).includes("couldn't find model") && kinds(evs).includes("model_chips"));
@@ -91,6 +116,7 @@ async function main() {
   console.log("Scenario 4: pre-order + stock handling");
   const s4 = getSession().id;
   await turn(s4, { type: "init" });
+  await identify(s4);
   await turn(s4, { type: "menu_choice", choice: "preorder" });
   await turn(s4, { type: "know_partno", value: true });
   evs = await turn(s4, { type: "text", text: "PS11754026" });
@@ -104,6 +130,7 @@ async function main() {
   console.log("Scenario 5: installation guidance");
   const s5 = getSession().id;
   await turn(s5, { type: "init" });
+  await identify(s5);
   evs = await turn(s5, { type: "text", text: "How can I install part number PS11752778?" });
   const install = evs.find((e) => e.kind === "install_card") as Extract<ServerEvent, { kind: "install_card" }> | undefined;
   expect("free text goes straight to the install card", !!install && install.guide.steps.length > 0, kinds(evs));
@@ -125,6 +152,7 @@ async function main() {
   console.log("Scenario 8: repair intent detection");
   const s8 = getSession().id;
   await turn(s8, { type: "init" });
+  await identify(s8);
   evs = await turn(s8, { type: "text", text: "The ice maker on my Whirlpool fridge is not working. How can I fix it?" });
   expect("detects repair intent and asks for the model", texts(evs).includes("model number"), texts(evs));
 
