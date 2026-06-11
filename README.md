@@ -148,7 +148,7 @@ To be precise about current state: **the system — including the production EC2
 
 ```
 appliance_models ──< compatibility >── parts ───1:1─── install_guides
-      (18)             (151 pairs)      (52)               (10)
+      (18)             (166 pairs)      (67)               (13)
         │                                │ │
         │                                │ └───< doc_chunks (16; optional part link,
         │                                │        embedding BLOB → 1024-d Titan vectors)
@@ -160,18 +160,20 @@ appliance_models ──< compatibility >── parts ───1:1─── insta
                                    └──< carts            (cleared on checkout)
 ```
 
-**Current contents (as seeded; production also accumulates guest users, searches, and live orders):**
+**Current contents (seed + real-data ingest; production also accumulates guest users, searches, and live orders):**
 
 | Table | Rows | Notes |
 |---|---|---|
 | `appliance_models` | 18 | 9 refrigerators + 9 dishwashers, 7 brands |
-| `parts` | 52 | incl. 2 zero-stock demo parts and 3 cleaning supplies |
-| `compatibility` | 151 | part↔model pairs — the only compatibility authority |
-| `install_guides` | 10 | structured: difficulty / minutes / tools / steps / links |
+| `parts` | 67 | **21 real parts ingested from partselect.com** (real PS numbers, prices, stock, symptoms) + synthetic seed incl. 2 zero-stock demo parts and 3 cleaning supplies |
+| `compatibility` | 166 | part↔model pairs — the only compatibility authority |
+| `install_guides` | 13 | structured: difficulty / minutes / tools / steps / links; 5 enriched with real difficulty, time, and YouTube videos from partselect.com |
 | `doc_chunks` | 16 | repair + maintenance knowledge; all 16 embedded with Titan v2 (1024-d) in production |
 | `users` | 4 | demo / sarah / mike / lisa sample personas (+ guests at runtime) |
 | `user_appliances` | 3 | demo×2 owned, sarah×1 owned; mike/lisa intentionally empty → inference demo |
 | `orders` / `order_items` | 4 / 5 | seeded purchase histories powering personalization |
+
+**Real-data ingestion (implemented).** `npm run db:seed && npm run ingest` replays [data/ingested/real-parts.json](partselect-agent/data/ingested/real-parts.json) — a harvest of the live WDT780SAEM1 and WRS325SDHZ01 catalogs — through [scripts/ingest-real.ts](partselect-agent/scripts/ingest-real.ts). Real data overwrites synthetic data by part number; two invented part numbers whose manufacturer numbers matched real parts were remapped in place (row ids preserved, so order history keeps its foreign keys). Notably, partselect.com returns **HTTP 403 to plain HTTP scrapers** (verified with curl and two server-side fetchers), so the harvest runs through a real browser session — see §11 for why this matters.
 
 **Is PostgreSQL "the same"?** Logically yes — tables, keys, and constraints carry over unchanged. The mechanical dialect differences that constitute the migration work:
 
@@ -226,7 +228,8 @@ Protocol-first design helps everywhere: the typed `ClientEvent`/`ServerEvent` co
 ```bash
 cd partselect-agent
 npm install
-npm run db:seed     # SQLite + seed: 18 models / 52 parts / 10 guides / 16 chunks
+npm run db:seed     # SQLite + synthetic seed
+npm run ingest      # merge real partselect.com data (18 models / 67 parts / 13 guides / 16 chunks total)
 npm run dev         # http://localhost:3000  (fully functional with no API keys)
 npm run test:flow   # 41 end-to-end assertions
 ```
@@ -262,4 +265,6 @@ A well-known public attempt at this case study is [gmunhoz0810/PartSelect-LLM-As
 | **Testing** | 41 automated end-to-end assertions in CI-runnable script | Manual spot checks ("10/10 tries correct" on one query) |
 | **Deployment** | Own domain + TLS on AWS (EC2/nginx/systemd), Bedrock via IAM | GitHub Pages frontend + locally-run backend (Procfile present) |
 
-**Where the reference implementation is genuinely stronger — and our answer.** Real-time scraping gives it the *entire* live PartSelect catalog (~2M parts, fresh prices) with zero storage. That is a real advantage for breadth, and we say so plainly. But it is also a ceiling: a scraper can read pages, yet it can never hold stock authority, write an order, or guarantee compatibility after a markup change — which is why that design *cannot* satisfy the transactional half of the brief, and why its author lists HTML-dependence as his first negative. The two approaches converge in our roadmap: our seed script is deliberately shaped as an **ingestion contract** — pointing a PartSelect scraper at the same arrays yields breadth *and* freshness on top of a transactional, testable, personalized commerce agent, rather than instead of one.
+**Where the reference implementation is genuinely stronger — and our answer.** Real-time scraping gives it the *entire* live PartSelect catalog (~2M parts, fresh prices) with zero storage. That is a real advantage for breadth, and we say so plainly. But it is also a ceiling: a scraper can read pages, yet it can never hold stock authority, write an order, or guarantee compatibility after a markup change — which is why that design *cannot* satisfy the transactional half of the brief, and why its author lists HTML-dependence as his first negative.
+
+That brittleness is no longer hypothetical: **as of 2026-06-11, partselect.com returns HTTP 403 to plain HTTP clients** (verified with curl and two independent server-side fetchers). The reference implementation's per-request scraping would not function against today's site, while this system keeps answering from its owned catalog. We closed the breadth gap from the other direction: the **ingestion contract is implemented** ([scripts/ingest-real.ts](partselect-agent/scripts/ingest-real.ts)) — real catalog slices for the case study's hero models (21 real parts: real PartSelect numbers, prices, stock states, symptom lists, difficulty ratings, and installation videos) were harvested through a real browser session, which passes the bot protection that blocks HTTP scrapers, and merged into the transactional schema. Breadth *and* freshness on top of a commerce agent — not instead of one.

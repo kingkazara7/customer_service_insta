@@ -1,0 +1,91 @@
+{
+  "harvestedAt": "2026-06-11",
+  "source": "partselect.com — harvested via a real browser session (HTTP scrapers are blocked with 403)",
+  "remap": {
+    "PS11722152": "PS3406971",
+    "PS9493452": "PS11701542"
+  },
+  "models": [
+    {
+      "modelNo": "WDT780SAEM1",
+      "type": "dishwasher",
+      "brand": "Whirlpool",
+      "parts": [
+        { "ps": "PS3406971", "mfr": "W10195416", "name": "Lower Dishrack Wheel", "price": 33.69, "stock": "In Stock", "slug": "Whirlpool-W10195416-Lower-Dishrack-Wheel" },
+        { "ps": "PS10065979", "mfr": "W10712395", "name": "Upper Rack Adjuster Kit - White Wheels, Left and Right Sides", "price": 55.29, "stock": "In Stock", "slug": "Whirlpool-W10712395-Upper-Rack-Adjuster-Kit-White-Wheels-Left-and-Right-Sides" },
+        { "ps": "PS11746591", "mfr": "WP8565925", "name": "Dishwasher Rack Track Stop", "price": 9.62, "stock": "In Stock", "slug": "Whirlpool-WP8565925-Dishwasher-Rack-Track-Stop" },
+        { "ps": "PS972325", "mfr": "8194001", "name": "Door Balance Link Kit", "price": 29.47, "stock": "In Stock", "slug": "Whirlpool-8194001-Door-Balance-Link-Kit" },
+        { "ps": "PS11745496", "mfr": "WP8269145", "name": "Dishwasher Mounting Bracket", "price": 15.00, "stock": "In Stock", "slug": "Whirlpool-WP8269145-Dishwasher-Mounting-Bracket" },
+        { "ps": "PS11750093", "mfr": "WPW10195840", "name": "Dishwasher Positioner", "price": 48.45, "stock": "In Stock", "slug": "Whirlpool-WPW10195840-Dishwasher-Positioner" },
+        { "ps": "PS12348515", "mfr": "W11177741", "name": "Dishwasher Door Seal", "price": 57.38, "stock": "In Stock", "slug": "Whirlpool-W11177741-Dishwasher-Door-Seal" },
+        { "ps": "PS11753379", "mfr": "WPW10348269", "name": "Dishwasher Drain Pump", "price": 62.60, "stock": "In Stock", "slug": "Whirlpool-WPW10348269-Dishwasher-Drain-Pump" },
+        { "ps": "PS11750092", "mfr": "WPW10195839", "name": "Dishwasher Dishrack Adjuster", "price": 35.80, "stock": "In Stock", "slug": "Whirlpool-WPW10195839-Dishwasher-Dishrack-Adjuster" },
+        { "ps": "PS11755592", "mfr": "WPW10491331", "name": "Dishwasher Lower Spray Arm", "price": 44.23, "stock": "In Stock", "slug": "Whirlpool-WPW10491331-Dishwasher-Lower-Spray-Arm" },
+        { "ps": "PS11755736", "mfr": "WPW10503548", "name": "Dishwasher Retainer Clip", "price": 22.52, "stock": "In Stock", "slug": "Whirlpool-WPW10503548-Dishwasher-Retainer-Clip" },
+        { "ps": "PS11759673", "mfr": "W10872845", "name": "Dishwasher Filter", "price": 48.45, "stock": "In Stock", "slug": "Whirlpool-W10872845-Dishwasher-Filter" }
+      ]
+    },
+    {
+      "modelNo": "WRS325SDHZ01",
+      "type": "refrigerator",
+      "brand": "Whirlpool",
+      "parts": [
+        { "ps": "PS11701542", "mfr": "EDR1RXD1", "name": "Refrigerator Ice and Water Filter", "price": 84.45, "stock": "In Stock", "slug": "Whirlpool-EDR1RXD1-Refrigerator-Ice-and-Water-Filter" },
+        { "ps": "PS12728638", "mfr": "W11384469", "name": "Refrigerator Door Switch", "price": 30.53, "stock": "In Stock", "slug": "Whirlpool-W11384469-Refrigerator-Door-Switch" },
+        { "ps": "PS372186", "mfr": "4388736", "name": "Refrigerator Ice Bin Auger Drum", "price": 53.20, "stock": "In Stock", "slug": "Whirlpool-4388736-Refrigerator-Ice-Bin-Auger-Drum" },
+        { "ps": "PS11757044", "mfr": "WPW10670845", "name": "Refrigerator Ice Bucket", "price": 97.14, "stock": "In Stock", "slug": "Whirlpool-WPW10670845-Refrigerator-Ice-Bucket" },
+        { "ps": "PS12578777", "mfr": "W11239961", "name": "Door Shelf Bin (Large)", "price": 120.54, "stock": "In Stock", "slug": "Whirlpool-W11239961-Door-Shelf-Bin" },
+        { "ps": "PS17629131", "mfr": "W11700559", "name": "Ice Maker Kit - Complete Assembly", "price": 146.56, "stock": "In Stock", "slug": "Whirlpool-W11700559-ICE-MAKER-KIT-PKG-ASSEMBLY-EZ" },
+        { "ps": "PS12347929", "mfr": "W11162443", "name": "Crisper Drawer", "price": 111.56, "stock": "In Stock", "slug": "Whirlpool-W11162443-Crisper-Drawer" },
+        { "ps": "PS11730901", "mfr": "W10823511", "name": "Water Tube Kit", "price": 27.36, "stock": "In Stock", "slug": "Whirlpool-W10823511-Water-Tube-Kit" },
+        { "ps": "PS11740306", "mfr": "WP2309941", "name": "Door Shelf", "price": 62.60, "stock": "In Stock", "slug": "Whirlpool-WP2309941-Door-Shelf" }
+      ]
+    }
+  ],
+  "details": {
+    "PS11752778": {
+      "description": "This refrigerator door bin is a genuine OEM replacement designed to fit many side-by-side refrigerator models. Compatible with brands like KitchenAid, Maytag, and Amana, it attaches to the interior door, providing storage for jars and bottles.",
+      "symptoms": "door won't open or close, ice maker won't dispense ice, leaking",
+      "difficulty": "Really Easy",
+      "installTime": "Less than 15 mins",
+      "price": 47.40,
+      "videoUrl": "https://www.youtube.com/watch?v=zSCNN6KpDE8",
+      "slug": "Whirlpool-WPW10321304-Refrigerator-Door-Shelf-Bin"
+    },
+    "PS17629131": {
+      "description": "This genuine OEM ice maker kit is designed to fit refrigerators that did not originally come with an ice maker. This kit contains everything needed to install the new ice maker on your refrigerator including: the ice maker, ice bin, inlet valve, fill tube, and hardware. If your new ice maker does not function properly after being installed, check the freezer temperature — it must be around zero degrees Fahrenheit.",
+      "symptoms": "ice maker not making ice, ice maker won't dispense ice, leaking",
+      "difficulty": "Easy",
+      "installTime": "30 - 60 mins",
+      "videoUrl": "https://www.youtube.com/watch?v=qxzSefs1XJA"
+    },
+    "PS11701542": {
+      "description": "The EDR1RXD1 water filter provides clean, fresh-tasting water by reducing contaminants such as lead, chlorine, and particulates. Designed for easy installation, this filter ensures your refrigerator water and ice are safe and refreshing with every use.",
+      "symptoms": "not dispensing water, ice maker not making ice, ice maker won't dispense ice, leaking, ice maker dispenses too little ice",
+      "difficulty": "Really Easy",
+      "installTime": "15 - 30 mins",
+      "videoUrl": "https://www.youtube.com/watch?v=rryiwFOJBYg"
+    },
+    "PS11753379": {
+      "description": "This drain pump is used in dishwashers to remove water from the dishwasher tub. If the impeller is damaged or the motor has shorted out and the dishwasher will not drain, replace the drain pump. Tools needed: Phillips screwdriver, 5/16 inch nut driver, 5/8 inch wrench, and a flathead screwdriver.",
+      "symptoms": "not draining, leaking, noisy, not cleaning dishes properly, will not start",
+      "difficulty": "Really Easy",
+      "installTime": "15 - 30 mins",
+      "videoUrl": "https://www.youtube.com/watch?v=LRTH3Wq_Apw"
+    },
+    "PS11759673": {
+      "description": "This dishwasher filter is a genuine OEM component designed to work with the water pump, preventing debris from entering and potentially damaging the pump system. Over time the filter may become clogged or damaged, leading to poor cleaning results or drainage issues. Replacement is straightforward: turn the old filter counterclockwise and lift it out.",
+      "symptoms": "not cleaning dishes properly, not draining, not drying dishes properly, leaking, clogged",
+      "difficulty": "Easy",
+      "installTime": "Less than 15 mins",
+      "videoUrl": "https://www.youtube.com/watch?v=rb6amLby04k"
+    },
+    "PS10065979": {
+      "description": "This authentic Dishwasher Upper Rack Adjuster Kit with white wheels comes with all the necessary parts for a dishwasher rack adjuster. It fits onto the dishwasher rack and connects it to the track allowing it to slide in and out. If broken, the rack will no longer slide properly and the part must be replaced.",
+      "symptoms": "door won't close, door latch failure, not cleaning dishes properly, noisy, leaking, will not start, upper rack sagging",
+      "difficulty": "Really Easy",
+      "installTime": "30 - 60 mins",
+      "videoUrl": "https://www.youtube.com/watch?v=pZO1rcMwKBc"
+    }
+  }
+}
