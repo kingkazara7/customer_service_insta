@@ -140,6 +140,50 @@ Schema: [schema.sql](partselect-agent/src/server/db/schema.sql). SQLite in devel
 
 At catalog scale (10²–10⁴ parts) a dedicated vector database adds an operational dependency for no measurable gain. pgvector keeps vectors **in the same database as the filters** — one SQL statement can combine `appliance_type = 'dishwasher' AND part_id = …` with similarity ranking. The `EmbeddingProvider` interface (Titan v2 on Bedrock in prod, optional local model offline, `none` → keyword fallback) keeps the retrieval layer swappable without touching callers.
 
+### 5.3 What the database looks like *today* (SQLite, pre-migration)
+
+To be precise about current state: **the system — including the production EC2 deployment — currently runs entirely on SQLite** (one WAL-mode file, `data/partselect.db`). RDS PostgreSQL is provisioned but not yet wired in (tracked as the next engineering task). The *logical* schema is identical on both engines; what changes at migration time is dialect, not design.
+
+**Entity-relationship overview:**
+
+```
+appliance_models ──< compatibility >── parts ───1:1─── install_guides
+      (18)             (151 pairs)      (52)               (10)
+        │                                │ │
+        │                                │ └───< doc_chunks (16; optional part link,
+        │                                │        embedding BLOB → 1024-d Titan vectors)
+        │                                │
+        └──< user_appliances >── users   └──< order_items >── orders ──> users
+                  (3)            (4 + guests)     (5)           (4)
+                                   │
+                                   ├──< search_history   (appended per query)
+                                   └──< carts            (cleared on checkout)
+```
+
+**Current contents (as seeded; production also accumulates guest users, searches, and live orders):**
+
+| Table | Rows | Notes |
+|---|---|---|
+| `appliance_models` | 18 | 9 refrigerators + 9 dishwashers, 7 brands |
+| `parts` | 52 | incl. 2 zero-stock demo parts and 3 cleaning supplies |
+| `compatibility` | 151 | part↔model pairs — the only compatibility authority |
+| `install_guides` | 10 | structured: difficulty / minutes / tools / steps / links |
+| `doc_chunks` | 16 | repair + maintenance knowledge; all 16 embedded with Titan v2 (1024-d) in production |
+| `users` | 4 | demo / sarah / mike / lisa sample personas (+ guests at runtime) |
+| `user_appliances` | 3 | demo×2 owned, sarah×1 owned; mike/lisa intentionally empty → inference demo |
+| `orders` / `order_items` | 4 / 5 | seeded purchase histories powering personalization |
+
+**Is PostgreSQL "the same"?** Logically yes — tables, keys, and constraints carry over unchanged. The mechanical dialect differences that constitute the migration work:
+
+| SQLite (today) | PostgreSQL (target) |
+|---|---|
+| `INTEGER PRIMARY KEY AUTOINCREMENT` | `GENERATED ALWAYS AS IDENTITY` |
+| `TEXT DEFAULT (datetime('now'))` | `timestamptz DEFAULT now()` |
+| `embedding BLOB` (Float32 LE) | `embedding vector(1024)` + HNSW index |
+| cosine computed in-process (rag.ts) | `ORDER BY embedding <=> $1` in SQL |
+| `COLLATE NOCASE` lookups | `citext` column type or `ILIKE` |
+| `better-sqlite3` synchronous driver | `pg` async pool — the real refactor surface |
+
 ---
 
 ## 6. Extensibility & scalability
@@ -194,3 +238,28 @@ Optional: `ANTHROPIC_API_KEY` or `CLAUDE_CODE_USE_BEDROCK=1` for the live LLM; `
 EC2 t3.small (nginx → systemd-managed Next.js, Let's Encrypt TLS, Elastic IP) · Bedrock via IAM-scoped credentials · RDS PostgreSQL provisioned. Resource inventory: `DEPLOY-INFO.md`.
 
 Known next steps: SQLite→RDS migration (async pg refactor of the service layer), verified authentication, real catalog ingestion.
+
+---
+
+## 11. Comparison with a public reference implementation
+
+A well-known public attempt at this case study is [gmunhoz0810/PartSelect-LLM-Assistant](https://github.com/gmunhoz0810/PartSelect-LLM-Assistant) (GPT-4o + FastAPI, documented in the author's slide deck). Facts below come from its source code (`backend/app.py`) and the author's own slides.
+
+**Its design in one line:** a pure agent — every query goes through GPT-4o with 4 OpenAI function-calling tools that **scrape partselect.com in real time** (BeautifulSoup over CSS selectors); SQLite is used only to log conversation history; the frontend is a non-streaming chat on GitHub Pages.
+
+| Dimension | This project | Reference implementation |
+|---|---|---|
+| **Scope vs. the brief** | Information **and transactions**: cart, stock, checkout, payment, order history — the brief explicitly asks to "assist with customer transactions" | Information lookup only; author confirms no cart/checkout — buying happens on partselect.com |
+| **Architecture** | Hybrid state machine + agent; LLM touched only at 3 fuzzy nodes | Pure agent; every query (even "info about PS11752778") is an LLM round-trip |
+| **Cost / latency profile** | Deterministic paths: 0 tokens, milliseconds. Two of the three case-study examples never invoke the LLM | Author's own numbers: ~7 s average, 9–13 s for model queries; every query pays GPT-4o |
+| **Data layer** | Owned transactional catalog: stock authority, oversell-proof orders, price snapshots | No catalog at all — author's slides: *"Very dependent on current PS website html structure"*; one CSS redesign breaks every tool |
+| **Compatibility answers** | Relational matrix, exact SQL | Scraped from PS pages (accurate while the HTML holds) |
+| **RAG** | Two-tier: structured SQL + vector retrieval (Titan/pgvector path) with source citations and keyword fallback | None — repair content scraped per request |
+| **Identity & personalization** | Email/guest accounts, purchase history, appliance cards, **appliance inference from purchased parts**, address pre-fill | None (anonymous, capped 50-message history) |
+| **UX** | SSE streaming; interactive components (part cards with stock badges, confirm-to-cart, forms) | Non-streaming text/markdown; author notes ~1% of responses render media incorrectly |
+| **Resilience** | Degraded no-LLM mode completes every flow; guardrails are mechanical (read-only tools) | Hard dependency on OpenAI availability + PS HTML stability; guardrails are prompt-level |
+| **Tool layer** | 9 read-only MCP tools (open standard, reusable by other clients, liftable to remote services) | 4 bespoke OpenAI function definitions; author lists "only has 4 LLM tools" as a limitation |
+| **Testing** | 41 automated end-to-end assertions in CI-runnable script | Manual spot checks ("10/10 tries correct" on one query) |
+| **Deployment** | Own domain + TLS on AWS (EC2/nginx/systemd), Bedrock via IAM | GitHub Pages frontend + locally-run backend (Procfile present) |
+
+**Where the reference implementation is genuinely stronger — and our answer.** Real-time scraping gives it the *entire* live PartSelect catalog (~2M parts, fresh prices) with zero storage. That is a real advantage for breadth, and we say so plainly. But it is also a ceiling: a scraper can read pages, yet it can never hold stock authority, write an order, or guarantee compatibility after a markup change — which is why that design *cannot* satisfy the transactional half of the brief, and why its author lists HTML-dependence as his first negative. The two approaches converge in our roadmap: our seed script is deliberately shaped as an **ingestion contract** — pointing a PartSelect scraper at the same arrays yields breadth *and* freshness on top of a transactional, testable, personalized commerce agent, rather than instead of one.

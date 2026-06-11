@@ -140,6 +140,50 @@ Schema 见 [schema.sql](partselect-agent/src/server/db/schema.sql)。开发用 S
 
 目录规模(10²–10⁴ 零件)下,独立向量数据库只增加运维依赖、不带来可感知收益。pgvector 让向量**与过滤条件同库**——一条 SQL 同时完成 `appliance_type = 'dishwasher' AND part_id = …` 过滤与相似度排序。`EmbeddingProvider` 接口(生产 Bedrock Titan v2、离线可选本地模型、`none` → 关键词兜底)保证检索层可整体替换而调用方无感。
 
+### 5.3 数据库的*当前*形态(SQLite,迁移前)
+
+把现状说精确:**整个系统——包括生产环境 EC2——目前完全跑在 SQLite 上**(单个 WAL 模式文件 `data/partselect.db`)。RDS PostgreSQL 已建好但尚未接入(已列为下一项工程任务)。两个引擎上的*逻辑* schema 完全一致;迁移时变的是方言,不是设计。
+
+**实体关系总览:**
+
+```
+appliance_models ──< compatibility >── parts ───1:1─── install_guides
+      (18)             (151 对)        (52)               (10)
+        │                                │ │
+        │                                │ └───< doc_chunks(16;可选关联零件,
+        │                                │        embedding BLOB → 1024 维 Titan 向量)
+        │                                │
+        └──< user_appliances >── users   └──< order_items >── orders ──> users
+                  (3)           (4 + 游客)      (5)            (4)
+                                   │
+                                   ├──< search_history(每次查询追加)
+                                   └──< carts(结算时清空)
+```
+
+**当前数据量(种子基线;生产环境还会持续累积游客、搜索与真实订单):**
+
+| 表 | 行数 | 说明 |
+|---|---|---|
+| `appliance_models` | 18 | 冰箱 9 + 洗碗机 9,7 个品牌 |
+| `parts` | 52 | 含 2 个零库存演示件、3 个清洁用品 |
+| `compatibility` | 151 | 零件↔型号对——兼容性的唯一权威来源 |
+| `install_guides` | 10 | 结构化:难度/分钟/工具/步骤/链接 |
+| `doc_chunks` | 16 | 维修+保养知识;生产环境 16 块全部用 Titan v2 嵌入(1024 维) |
+| `users` | 4 | demo / sarah / mike / lisa 样例人设(运行时另加游客) |
+| `user_appliances` | 3 | demo×2 已购、sarah×1 已购;mike/lisa 刻意留空 → 演示机型反推 |
+| `orders` / `order_items` | 4 / 5 | 种子购买历史,驱动个性化 |
+
+**PostgreSQL 上"一样吗"?** 逻辑上完全一样——表、键、约束原样迁移。构成迁移工作量的是这些机械的方言差异:
+
+| SQLite(现在) | PostgreSQL(目标) |
+|---|---|
+| `INTEGER PRIMARY KEY AUTOINCREMENT` | `GENERATED ALWAYS AS IDENTITY` |
+| `TEXT DEFAULT (datetime('now'))` | `timestamptz DEFAULT now()` |
+| `embedding BLOB`(Float32 LE) | `embedding vector(1024)` + HNSW 索引 |
+| 进程内算余弦(rag.ts) | SQL 里 `ORDER BY embedding <=> $1` |
+| `COLLATE NOCASE` 查询 | `citext` 类型或 `ILIKE` |
+| `better-sqlite3` 同步驱动 | `pg` 异步连接池——真正的重构面 |
+
 ---
 
 ## 六、扩展性与可伸缩性
@@ -194,3 +238,28 @@ npm run test:flow   # 41 项端到端断言
 EC2 t3.small(nginx → systemd 托管的 Next.js,Let's Encrypt TLS,弹性 IP)· Bedrock 经 IAM 限权凭证 · RDS PostgreSQL 已就绪。资源清单:`DEPLOY-INFO.md`。
 
 已知后续:SQLite→RDS 迁移(服务层异步 pg 重构)、可验证的身份认证、真实目录数据摄入。
+
+---
+
+## 十一、与公开参考实现的对比
+
+这个案例研究有一个知名的公开实现:[gmunhoz0810/PartSelect-LLM-Assistant](https://github.com/gmunhoz0810/PartSelect-LLM-Assistant)(GPT-4o + FastAPI,作者配有幻灯片讲解)。以下事实均来自其源码(`backend/app.py`)与作者本人的幻灯片。
+
+**他的设计一句话概括:** 纯 Agent——每个查询都过 GPT-4o,配 4 个 OpenAI 函数调用工具**实时爬取 partselect.com**(BeautifulSoup 解析 CSS 选择器);SQLite 只用来存对话日志;前端是部署在 GitHub Pages 上的非流式聊天。
+
+| 维度 | 本项目 | 参考实现 |
+|---|---|---|
+| **对题目范围的覆盖** | 信息**与交易**:购物车、库存、结算、支付、订单历史——题目明确要求 "assist with customer transactions" | 仅信息查询;无购物车/结算——购买要去 partselect.com 完成 |
+| **架构** | 状态机 + Agent 混合;LLM 只在 3 个模糊节点被触达 | 纯 Agent;任何查询(哪怕"PS11752778 的信息")都是一次 LLM 往返 |
+| **成本/延迟画像** | 确定性路径:0 token、毫秒级;案例三道例题中两道从不调用 LLM | 作者自报数据:平均约 7 秒,型号查询 9–13 秒;每个查询都付 GPT-4o 的钱 |
+| **数据层** | 自有事务型目录:库存权威、防超卖订单、价格快照 | 没有目录——作者幻灯片原话:*"Very dependent on current PS website html structure"*;一次改版全部工具失效 |
+| **兼容性回答** | 关系矩阵,精确 SQL | 从 PS 页面爬取(HTML 不变时准确) |
+| **RAG** | 双层:结构化 SQL + 向量检索(Titan/pgvector 路径),带来源标注与关键词兜底 | 无——维修内容按请求实时爬取 |
+| **身份与个性化** | 邮箱/游客账号、购买历史、家电卡片、**由已购零件反推机型**、地址预填 | 无(匿名,50 条消息上限) |
+| **用户体验** | SSE 流式;交互组件(带库存标签的零件卡片、确认制加购、表单) | 非流式纯文本/markdown;作者自述约 1% 的回复媒体格式渲染错误 |
+| **韧性** | 无 LLM 降级模式可完成全部流程;防护栏是机制级的(只读工具) | 硬依赖 OpenAI 可用性 + PS HTML 稳定性;防护栏是提示词级的 |
+| **工具层** | 9 个只读 MCP 工具(开放标准,可被其他客户端复用、可提升为远程服务) | 4 个定制 OpenAI 函数;作者把"只有 4 个工具"列为自身局限 |
+| **测试** | 41 项自动化端到端断言(可进 CI) | 人工抽查(单个查询"10/10 次正确") |
+| **部署** | AWS 自有域名 + TLS(EC2/nginx/systemd),Bedrock 走 IAM | GitHub Pages 前端 + 本地运行的后端(有 Procfile) |
+
+**参考实现真正更强的地方——以及我们的回应。** 实时爬取让他拿到*整个* PartSelect 在线目录(约 200 万零件、实时价格)且零存储成本。这是广度上的真实优势,我们直说。但它同时是一个天花板:爬虫能读页面,却永远无法持有库存权威、写入订单、或在页面改版后保证兼容性判断——所以这条路线*无法*满足题目里交易那一半的要求,这也是作者把"依赖 HTML 结构"列为第一条缺点的原因。两种路线在我们的路线图里汇合:种子脚本被刻意设计成**数据摄入契约**——让 PartSelect 爬虫对准同样的数组结构灌数据,得到的是"广度 + 新鲜度"叠加在一个可交易、可测试、可个性化的电商 Agent 之上,而不是用前者替代后者。
