@@ -7,6 +7,35 @@ export function getOrCreateDemoUser(): number {
   return getOrCreateUserByEmail("demo@example.com").id;
 }
 
+/** Guest account: full functionality, no history (email stays null) */
+export function createGuestUser(): number {
+  return Number(
+    getDb().prepare("INSERT INTO users (name) VALUES ('Guest')").run().lastInsertRowid
+  );
+}
+
+/**
+ * For customers who bought parts but never registered an appliance:
+ * infer which machines they likely own from part compatibility,
+ * ranked by how many of their purchased parts fit each model.
+ */
+export function inferModelsFromPurchases(userId: number, limit = 4): ApplianceModel[] {
+  return getDb()
+    .prepare(
+      `SELECT m.id, m.model_no, m.brand, m.appliance_type, m.name
+       FROM appliance_models m
+       JOIN compatibility c ON c.model_id = m.id
+       JOIN order_items oi ON oi.part_id = c.part_id
+       JOIN orders o ON o.id = oi.order_id
+       WHERE o.user_id = ?
+         AND m.id NOT IN (SELECT model_id FROM user_appliances WHERE user_id = ?)
+       GROUP BY m.id
+       ORDER BY COUNT(DISTINCT oi.part_id) DESC, m.model_no
+       LIMIT ?`
+    )
+    .all(userId, userId, limit) as ApplianceModel[];
+}
+
 /**
  * Email-based identification: returning customers get their purchase history
  * (appliance cards, past parts, saved address); unknown emails get a fresh account.

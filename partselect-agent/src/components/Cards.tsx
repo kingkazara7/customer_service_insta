@@ -8,7 +8,10 @@ import type {
 const typeIcon = (t: string) => (t === "refrigerator" ? "🧊" : "🍽️");
 const typeName = (t: string) => (t === "refrigerator" ? "refrigerator" : "dishwasher");
 
-export function EmailForm(props: { onSubmit: (email: string) => void }) {
+export function EmailForm(props: {
+  onSubmit: (email: string) => void;
+  onGuest: () => void;
+}) {
   const [email, setEmail] = useState("");
   const [done, setDone] = useState(false);
   const ok = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
@@ -32,10 +35,18 @@ export function EmailForm(props: { onSubmit: (email: string) => void }) {
         />
       </div>
       <div className="demoNote">
-        💡 Demo tip: try <b>demo@example.com</b> to see a returning customer with appliances and purchase history.
+        💡 Demo tip: try <b>demo@example.com</b> (owned appliances) or <b>mike@example.com</b> (bought parts only — watch the appliance inference).
       </div>
       <button className="checkoutBtn" disabled={!ok || done} onClick={submit}>
-        {done ? "Looking up your account…" : "Continue"}
+        {done ? "Looking up your account…" : "Continue with email"}
+      </button>
+      <button
+        className="chip ghost"
+        style={{ width: "100%" }}
+        disabled={done}
+        onClick={() => { setDone(true); props.onGuest(); }}
+      >
+        Continue as guest
       </button>
     </div>
   );
@@ -56,7 +67,9 @@ export function ApplianceCards(props: {
           <div className="icon">{typeIcon(a.applianceType)}</div>
           <div className="model">{a.brand} {a.modelNo}</div>
           {a.name && <div className="name">{a.name}</div>}
-          <span className="src">{a.source === "purchased" ? "✓ Owned" : "Searched"}</span>
+          <span className="src">
+            {a.source === "purchased" ? "✓ Owned" : a.source === "inferred" ? "Likely yours" : "Searched"}
+          </span>
         </div>
       ))}
     </div>

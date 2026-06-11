@@ -33,23 +33,51 @@ async function identify(sessionId: string, email = "demo@example.com") {
 }
 
 async function main() {
-  // ── Scenario 0: email identity gate ──
-  console.log("Scenario 0: email identity gate");
+  // ── Scenario 0: email / guest identity ──
+  console.log("Scenario 0: email and guest identity");
   const s0 = getSession().id;
   let evs = await turn(s0, { type: "init" });
-  expect("init asks for email", kinds(evs).includes("email_form"));
-  evs = await turn(s0, { type: "menu_choice", choice: "broken" });
-  expect("actions before identification are blocked", kinds(evs).includes("email_form"));
+  expect("init asks for email (with guest option)", kinds(evs).includes("email_form"));
   evs = await turn(s0, { type: "submit_email", email: "not-an-email" });
   expect("invalid email is rejected", texts(evs).includes("valid email"));
   evs = await turn(s0, { type: "submit_email", email: "newcustomer@test.com" });
   expect("new email creates a fresh account", texts(evs).includes("Account created"));
   expect("fresh account has no appliance cards", !kinds(evs).includes("appliance_cards"));
+
+  // Guest path: just start talking — nothing is blocked
+  const sg = getSession().id;
+  await turn(sg, { type: "init" });
+  evs = await turn(sg, { type: "text", text: "PS11752778" });
+  expect(
+    "unidentified user is auto-promoted to guest and gets an answer",
+    texts(evs).includes("guest") && kinds(evs).includes("part_cards"),
+    kinds(evs)
+  );
+  evs = await turn(sg, { type: "continue_guest" });
+  expect("explicit guest button also works", kinds(evs).includes("menu"));
+
+  // Returning customer with appliances on file
   const s0b = getSession().id;
   await turn(s0b, { type: "init" });
   evs = await identify(s0b);
   expect("returning email is welcomed back", texts(evs).includes("Welcome back"));
   expect("returning email loads appliance cards", kinds(evs).includes("appliance_cards"));
+
+  // Parts-only buyer → appliance inference from purchased parts
+  const sm = getSession().id;
+  await turn(sm, { type: "init" });
+  evs = await identify(sm, "mike@example.com");
+  const inferredCards = evs.find((e) => e.kind === "appliance_cards") as Extract<ServerEvent, { kind: "appliance_cards" }> | undefined;
+  expect(
+    "parts-only buyer gets inferred appliance suggestions",
+    texts(evs).includes("likely") && !!inferredCards && inferredCards.appliances.every((a) => a.source === "inferred"),
+    texts(evs).slice(0, 200)
+  );
+  expect(
+    "inferred models are dishwashers matching his parts",
+    !!inferredCards && inferredCards.appliances.every((a) => a.applianceType === "dishwasher"),
+    inferredCards?.appliances
+  );
 
   // ── Scenario 1: full purchase flow (broken-appliance branch) ──
   console.log("Scenario 1: broken appliance → diagnose → add to cart → checkout → pay");
@@ -155,6 +183,23 @@ async function main() {
   await identify(s8);
   evs = await turn(s8, { type: "text", text: "The ice maker on my Whirlpool fridge is not working. How can I fix it?" });
   expect("detects repair intent and asks for the model", texts(evs).includes("model number"), texts(evs));
+
+  // ── Scenario 9: self-cleaning guidance (case: clogged dishwasher) ──
+  console.log("Scenario 9: self-cleaning guidance");
+  const s9 = getSession().id;
+  await turn(s9, { type: "init" });
+  await identify(s9);
+  await turn(s9, { type: "select_appliance", modelNo: "WDT780SAEM1" });
+  evs = await turn(s9, {
+    type: "text",
+    text: "My dishwasher is clogged and smells bad. How do I clean it myself?",
+  });
+  expect(
+    "returns self-cleaning instructions (filter rinse / cleaner cycle)",
+    texts(evs).toLowerCase().includes("filter"),
+    texts(evs).slice(0, 300)
+  );
+  expect("offers cleaning supplies as purchasable parts", kinds(evs).includes("part_cards"));
 
   console.log(failures === 0 ? "\nAll checks passed ✅" : `\n${failures} check(s) failed ❌`);
   process.exit(failures === 0 ? 0 : 1);

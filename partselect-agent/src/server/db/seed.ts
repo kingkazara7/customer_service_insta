@@ -15,6 +15,12 @@ const models: ModelRow[] = [
   ["ED5VHEXVB01", "Whirlpool", "refrigerator", "Whirlpool Side-by-Side Refrigerator (Classic)"],
   ["GSS25GSHSS", "GE", "refrigerator", "GE 25 cu. ft. Side-by-Side Refrigerator"],
   ["RF28R7351SR", "Samsung", "refrigerator", "Samsung French Door Refrigerator"],
+  ["LFXS26973S", "LG", "refrigerator", "LG 26 cu. ft. French Door Refrigerator"],
+  ["WRX735SDHZ", "Whirlpool", "refrigerator", "Whirlpool 4-Door French Door Refrigerator"],
+  ["GNE27JSMSS", "GE", "refrigerator", "GE 27 cu. ft. French Door Refrigerator"],
+  ["MDB4949SHZ", "Maytag", "dishwasher", "Maytag Top-Control Dishwasher"],
+  ["GDT695SSJSS", "GE", "dishwasher", "GE Top-Control Dishwasher (Stainless)"],
+  ["DW80R5060US", "Samsung", "dishwasher", "Samsung StormWash Dishwasher"],
 ];
 
 type PartRow = {
@@ -258,6 +264,202 @@ const parts: PartRow[] = [
     symptoms: "not draining, standing water, E24 error code",
     fits: ["SHPM65Z55N"],
   },
+
+  // ── Refrigerator parts (expansion) ─────────────────────────
+  {
+    part_no: "PS11756577", mfr: "W10662129",
+    name: "Ice Dispenser Auger Motor",
+    desc: "Drives the auger that pushes ice to the dispenser chute. If ice is made but never dispensed, this motor has usually failed.",
+    type: "refrigerator", brand: "Whirlpool", price: 118.4, stock: 6,
+    symptoms: "ice dispenser not working, auger not turning, ice stuck in bin",
+    fits: ["WRS325SDHZ01", "WRS325FDAM04", "WRX735SDHZ"],
+  },
+  {
+    part_no: "PS11769128", mfr: "W11384469",
+    name: "Refrigerator LED Light Module",
+    desc: "Interior LED lighting module for fresh-food and freezer compartments.",
+    type: "refrigerator", brand: "Whirlpool", price: 44.2, stock: 27,
+    symptoms: "light not working, interior light flickering, dark inside",
+    fits: ["WRS325SDHZ01", "WRF555SDFZ09", "WRX735SDHZ"],
+  },
+  {
+    part_no: "PS11722127", mfr: "W10311524",
+    name: "Refrigerator Air Filter (FreshFlow)",
+    desc: "Carbon air filter that absorbs food odors inside the fresh-food compartment. Replace every 6 months.",
+    type: "refrigerator", brand: "Whirlpool", price: 19.99, stock: 60,
+    symptoms: "odor in refrigerator, smells bad, food odors",
+    fits: ["WRF555SDFZ09", "WRX735SDHZ", "WRS325SDHZ01"],
+  },
+  {
+    part_no: "PS12070396", mfr: "W10873791",
+    name: "Ice Dispenser Door Chute Flap",
+    desc: "Spring-loaded flap that seals the ice chute. A worn flap leaks cold air and causes frost around the dispenser.",
+    type: "refrigerator", brand: "Whirlpool", price: 31.75, stock: 12,
+    symptoms: "frost on dispenser, cold air leaking from chute, dispenser flap stuck",
+    fits: ["WRS325SDHZ01", "WRS325FDAM04"],
+  },
+  {
+    part_no: "PS11749133", mfr: "W10312695",
+    name: "Glass Shelf Assembly",
+    desc: "Full-width tempered glass shelf with frame for the fresh-food section.",
+    type: "refrigerator", brand: "Whirlpool", price: 89.5, stock: 8,
+    symptoms: "cracked shelf, broken glass shelf, shelf sagging",
+    fits: ["WRS325SDHZ01", "WRF555SDFZ09"],
+  },
+  {
+    part_no: "PS11739119", mfr: "W10127427",
+    name: "Defrost Heater Assembly",
+    desc: "Melts frost off the evaporator during defrost cycles. An open heater leads to heavy frost and warm fresh-food temperatures.",
+    type: "refrigerator", brand: "Whirlpool", price: 52.3, stock: 10,
+    symptoms: "frost buildup, refrigerator not cooling, ice on back wall",
+    fits: ["WRS325SDHZ01", "WRS325FDAM04", "ED5VHEXVB01"],
+  },
+  {
+    part_no: "PS11745588", mfr: "W10384183",
+    name: "Refrigerator Door Handle",
+    desc: "Replacement door handle, stainless finish, includes set screws.",
+    type: "refrigerator", brand: "Whirlpool", price: 48.6, stock: 14,
+    symptoms: "broken handle, loose handle, handle fell off",
+    fits: ["WRF555SDFZ09", "WRX735SDHZ"],
+  },
+  {
+    part_no: "PS8728568", mfr: "W10505928",
+    name: "Water Supply Line Kit",
+    desc: "PEX water line kit from house supply to the refrigerator. Replace if kinked, leaking, or after moving the unit.",
+    type: "refrigerator", brand: "Whirlpool", price: 24.95, stock: 33,
+    symptoms: "no water to ice maker, kinked water line, leaking behind fridge",
+    fits: ["WRS325SDHZ01", "WRS325FDAM04", "WRF555SDFZ09", "WRX735SDHZ", "ED5VHEXVB01"],
+  },
+  {
+    part_no: "PS11770358", mfr: "W10918546",
+    name: "Thermistor (Temperature Sensor)",
+    desc: "Senses compartment temperature for the control board. A drifting thermistor causes erratic temperatures.",
+    type: "refrigerator", brand: "Whirlpool", price: 26.8, stock: 16,
+    symptoms: "temperature fluctuating, too cold, freezing food in fresh food section",
+    fits: ["WRF555SDFZ09", "WRX735SDHZ", "WRS325SDHZ01"],
+  },
+  {
+    part_no: "PS3527402", mfr: "ADQ36006101",
+    name: "LG Refrigerator Water Filter (LT700P)",
+    desc: "Genuine LG water filter, replace every 6 months.",
+    type: "refrigerator", brand: "LG", price: 42.99, stock: 35,
+    symptoms: "bad tasting water, slow ice production, small ice cubes",
+    fits: ["LFXS26973S"],
+  },
+  {
+    part_no: "PS981638", mfr: "MWF",
+    name: "GE Refrigerator Water Filter (MWF)",
+    desc: "Genuine GE MWF water filter, replace every 6 months.",
+    type: "refrigerator", brand: "GE", price: 49.95, stock: 40,
+    symptoms: "bad tasting water, slow ice production, water dispenser slow",
+    fits: ["GSS25GSHSS", "GNE27JSMSS"],
+  },
+  {
+    part_no: "PS11722173", mfr: "PM14X10056",
+    name: "Condenser Coil Cleaning Brush",
+    desc: "27\" flexible bristle brush for cleaning dust off condenser coils — the #1 maintenance task to keep a refrigerator cooling efficiently. Use every 6-12 months.",
+    type: "refrigerator", brand: "Universal", price: 15.49, stock: 45,
+    symptoms: "dirty condenser coils, not cooling, cleaning, maintenance, running constantly",
+    fits: ["WRS325SDHZ01", "WRS325FDAM04", "WRF555SDFZ09", "WRX735SDHZ", "ED5VHEXVB01", "GSS25GSHSS", "GNE27JSMSS", "RF28R7351SR", "LFXS26973S"],
+  },
+
+  // ── Dishwasher parts (expansion) ───────────────────────────
+  {
+    part_no: "PS11750673", mfr: "W10300024",
+    name: "Dishwasher Filter Assembly",
+    desc: "Cylindrical fine filter plus mesh plate at the bottom of the tub. A clogged filter is the most common cause of standing water, odors, and poor cleaning — remove and rinse it monthly, replace if torn.",
+    type: "dishwasher", brand: "Whirlpool", price: 36.4, stock: 38,
+    symptoms: "clogged, standing water, odor, not cleaning, food particles on dishes",
+    fits: ["WDT780SAEM1", "WDT730PAHZ0", "WDF520PADM7", "KDTM354DSS4", "MDB4949SHZ"],
+  },
+  {
+    part_no: "PS11722139", mfr: "W10508950",
+    name: "Upper Rack Wheel Kit (4-Pack)",
+    desc: "Four wheels with clips for the upper dish rack.",
+    type: "dishwasher", brand: "Whirlpool", price: 18.75, stock: 31,
+    symptoms: "upper rack hard to slide, wheel broken, rack falling",
+    fits: ["WDT780SAEM1", "WDT730PAHZ0", "KDTM354DSS4"],
+  },
+  {
+    part_no: "PS11746573", mfr: "W10082861",
+    name: "Rinse Aid Dispenser Cap",
+    desc: "Replacement cap for the rinse aid reservoir. A cracked cap lets rinse aid leak out in one wash.",
+    type: "dishwasher", brand: "Whirlpool", price: 14.2, stock: 22,
+    symptoms: "rinse aid leaking, rinse aid empties fast, cap broken",
+    fits: ["WDT780SAEM1", "WDF520PADM7", "MDB4949SHZ"],
+  },
+  {
+    part_no: "PS11756367", mfr: "W10605057",
+    name: "Door Spring & Link Kit",
+    desc: "Door balance springs with links. Replace in pairs when the door slams down instead of lowering gently.",
+    type: "dishwasher", brand: "Whirlpool", price: 28.9, stock: 11,
+    symptoms: "door falls open, door slams down, door won't stay closed",
+    fits: ["WDT780SAEM1", "WDT730PAHZ0", "MDB4949SHZ"],
+  },
+  {
+    part_no: "PS11753783", mfr: "W10703867",
+    name: "Dishwasher Drain Hose",
+    desc: "Corrugated drain hose with clamps, 6.5 ft.",
+    type: "dishwasher", brand: "Whirlpool", price: 33.5, stock: 13,
+    symptoms: "leaking under sink, not draining, hose cracked",
+    fits: ["WDT780SAEM1", "WDT730PAHZ0", "WDF520PADM7"],
+  },
+  {
+    part_no: "PS11770327", mfr: "W10872845",
+    name: "Thermal Fuse Kit",
+    desc: "Protects the control board from overheating. A blown fuse means no lights and no power at all.",
+    type: "dishwasher", brand: "Whirlpool", price: 25.6, stock: 9,
+    symptoms: "no power, won't start, completely dead, no lights",
+    fits: ["WDT780SAEM1", "WDF520PADM7", "KDTM354DSS4"],
+  },
+  {
+    part_no: "PS11722011", mfr: "WPW10082831",
+    name: "Wash Arm Support / Hub",
+    desc: "Center hub that the lower spray arm snaps onto.",
+    type: "dishwasher", brand: "Whirlpool", price: 21.3, stock: 18,
+    symptoms: "spray arm fell off, spray arm loose, arm not seated",
+    fits: ["WDT780SAEM1", "WDT730PAHZ0", "WDF520PADM7"],
+  },
+  {
+    part_no: "PS12086972", mfr: "W11084657",
+    name: "Maytag Silverware Basket",
+    desc: "Full-width silverware basket for Maytag dishwashers.",
+    type: "dishwasher", brand: "Maytag", price: 29.95, stock: 15,
+    symptoms: "broken silverware basket, cracked grid",
+    fits: ["MDB4949SHZ"],
+  },
+  {
+    part_no: "PS16618109", mfr: "WD28X26099",
+    name: "GE Lower Spray Arm",
+    desc: "Lower spray arm for GE top-control dishwashers.",
+    type: "dishwasher", brand: "GE", price: 38.4, stock: 12,
+    symptoms: "dishes not clean, spray arm not spinning, cracked arm",
+    fits: ["GDT695SSJSS"],
+  },
+  {
+    part_no: "PS12722634", mfr: "DD82-01345A",
+    name: "Samsung Drain Pump",
+    desc: "Drain pump for Samsung StormWash dishwashers. LC/5C error codes often point here.",
+    type: "dishwasher", brand: "Samsung", price: 79.9, stock: 5,
+    symptoms: "not draining, standing water, LC error code, 5C error",
+    fits: ["DW80R5060US"],
+  },
+  {
+    part_no: "PS11756150", mfr: "W10549851",
+    name: "Dishwasher Cleaner Tablets (6-Pack)",
+    desc: "Descaling cleaner tablets that remove limescale and grease from the pump, spray arms, and filter. Run one tablet in an empty hot cycle monthly to prevent clogs and odors.",
+    type: "dishwasher", brand: "affresh", price: 12.99, stock: 80,
+    symptoms: "odor, smells bad, clogged, limescale, cleaning, self clean, maintenance, white film",
+    fits: ["WDT780SAEM1", "WDT730PAHZ0", "WDF520PADM7", "KDTM354DSS4", "FFCD2413US", "SHPM65Z55N", "MDB4949SHZ", "GDT695SSJSS", "DW80R5060US"],
+  },
+  {
+    part_no: "PS11774001", mfr: "W11178881",
+    name: "Dishwasher & Disposal Descaler (Citric Acid)",
+    desc: "Citric-acid descaler for hard-water buildup. Fixes white film on glasses and restores spray pressure lost to scale.",
+    type: "dishwasher", brand: "Universal", price: 11.5, stock: 50,
+    symptoms: "white film on dishes, cloudy glasses, limescale, hard water, cleaning",
+    fits: ["WDT780SAEM1", "WDT730PAHZ0", "WDF520PADM7", "KDTM354DSS4", "FFCD2413US", "SHPM65Z55N", "MDB4949SHZ", "GDT695SSJSS", "DW80R5060US"],
+  },
 ];
 
 type GuideRow = {
@@ -364,6 +566,29 @@ const guides: GuideRow[] = [
     ],
     manual: "https://www.partselect.com/Installation-Instructions/PS9493452/",
   },
+  {
+    part_no: "PS11750673", difficulty: "easy", minutes: 5, tools: "No tools required (soft brush helpful)",
+    steps: [
+      "Pull out the lower dish rack to expose the tub bottom",
+      "Twist the cylindrical filter a quarter turn counterclockwise and lift it out",
+      "Lift out the flat mesh plate beneath it",
+      "Rinse both under warm running water; scrub stuck-on grease with a soft brush and dish soap (never a wire brush)",
+      "Seat the mesh plate, insert the cylinder, and twist clockwise until the arrows align",
+      "Repeat monthly — a clean filter prevents most odor, drainage, and cleaning problems",
+    ],
+    manual: "https://www.partselect.com/Installation-Instructions/PS11750673/",
+  },
+  {
+    part_no: "PS11756150", difficulty: "easy", minutes: 90, tools: "No tools required",
+    steps: [
+      "Remove all dishes and racks contents — the dishwasher must run empty",
+      "Place one cleaner tablet in the detergent tray (or on the tub bottom)",
+      "Run the hottest, longest cycle available",
+      "For heavy buildup, run a second cycle with a tablet placed directly in the tub",
+      "Repeat monthly to prevent limescale, grease clogs, and odors",
+    ],
+    manual: "https://www.partselect.com/Installation-Instructions/PS11756150/",
+  },
 ];
 
 type ChunkRow = {
@@ -447,6 +672,48 @@ const chunks: ChunkRow[] = [
       "(Service manual excerpt, p.12) Notes after replacing the ice maker module: on first power-up the module runs an initialization — two blinks of the indicator LED on the front housing are a normal self-test. Discard the first 2–3 batches of ice from a new ice maker. If no ice is produced after 24 hours, check the water line and inlet valve, and confirm the freezer has reached 0°F (-18°C).",
     source_url: "https://www.partselect.com/Installation-Instructions/PS11770704/", source_ref: "p.12",
   },
+  {
+    source_type: "manual", part_no: "PS11750673", appliance_type: "dishwasher",
+    symptom_tags: "clogged, standing water, self clean, cleaning dishwasher, slow draining",
+    text:
+      "(Owner's manual excerpt — Cleaning & Maintenance) If your dishwasher is clogged, smells, or drains slowly, clean it before replacing any parts: 1) Pull the lower rack and twist out the cylindrical filter assembly (W10300024); rinse it under warm water with a soft brush and dish soap — never use a wire brush; 2) Wipe food debris out of the sump opening with a sponge; 3) Place a dishwasher cleaner tablet (such as affresh, W10549851) in an empty machine and run the hottest cycle to dissolve grease and limescale in the pump and hoses; a cup of white vinegar upright on the top rack works as a household alternative; 4) For hard-water scale and white film, run a citric-acid descaler instead. Repeat the filter rinse monthly and the cleaner cycle every 1–2 months.",
+    source_url: "https://www.partselect.com/Repair/Dishwasher/Cleaning-And-Maintenance/", source_ref: "p.18",
+  },
+  {
+    source_type: "repair_guide", appliance_type: "dishwasher",
+    symptom_tags: "smells bad, odor, dirty dishwasher",
+    text:
+      "Dishwasher odor checklist: 1) Clean the filter assembly first — trapped food is the source of most smells; 2) Wipe the inside edge of the door gasket with warm soapy water; old gaskets that stay damp can hold odors and may need replacement; 3) Run a monthly empty hot cycle with a dishwasher cleaner tablet or white vinegar; 4) Check the drain hose for a proper high loop — without one, sink water can back-flow and cause persistent smells.",
+    source_url: "https://www.partselect.com/Repair/Dishwasher/Odor/",
+  },
+  {
+    source_type: "repair_guide", appliance_type: "dishwasher",
+    symptom_tags: "white film on dishes, cloudy glasses, limescale, hard water",
+    text:
+      "White film or cloudy glasses usually mean hard-water limescale, not a broken part: 1) Run an empty cycle with a citric-acid descaler to dissolve scale in the pump, heater, and spray arms; 2) Keep the rinse aid reservoir topped up — rinse aid prevents mineral spotting; 3) If your water is very hard (>10 grains), use a detergent booster in each load. If the film scratches off with a fingernail it's protein etching instead — reduce detergent dose and water temperature.",
+    source_url: "https://www.partselect.com/Repair/Dishwasher/White-Film/",
+  },
+  {
+    source_type: "repair_guide", appliance_type: "refrigerator",
+    symptom_tags: "dirty condenser coils, cleaning, maintenance, running constantly, not cooling",
+    text:
+      "Condenser coil cleaning (every 6–12 months, more often with pets): 1) Unplug the refrigerator; 2) Remove the base grille at the front bottom (snaps off); 3) Slide a coil cleaning brush along the coils to loosen dust, then vacuum it up with a crevice tool; 4) On models with rear-mounted coils, pull the unit out and brush from behind; 5) Snap the grille back and restore power. Dusty coils make the compressor run constantly, raise energy use, and are the most common cause of gradual cooling loss.",
+    source_url: "https://www.partselect.com/Repair/Refrigerator/Coil-Cleaning/",
+  },
+  {
+    source_type: "repair_guide", appliance_type: "refrigerator",
+    symptom_tags: "odor in refrigerator, smells bad, food odors",
+    text:
+      "Refrigerator odor checklist: 1) Replace the air filter (FreshFlow W10311524) if your model has one — it absorbs food odors and should be changed every 6 months; 2) Wash bins and shelves with warm water and baking soda (avoid bleach near gaskets); 3) Check and rinse the defrost drain pan underneath — standing water there is a common hidden odor source; 4) Keep an open box of baking soda inside as ongoing prevention.",
+    source_url: "https://www.partselect.com/Repair/Refrigerator/Odor/",
+  },
+  {
+    source_type: "repair_guide", appliance_type: "refrigerator",
+    symptom_tags: "ice tastes bad, cleaning ice maker, ice smells, old ice",
+    text:
+      "Bad-tasting ice: 1) Discard all old ice — ice absorbs freezer odors over time; 2) Wash the ice bin with warm soapy water, rinse, and dry completely before refitting; 3) Replace the water filter if it's over 6 months old; 4) For mineral scale inside the ice maker mold, run the ice maker's cleaning cycle if available, or replace the fill cup assembly. Never use descaling chemicals inside the ice mold itself.",
+    source_url: "https://www.partselect.com/Repair/Refrigerator/Ice-Taste/",
+  },
 ];
 
 function seed() {
@@ -514,26 +781,49 @@ function seed() {
       );
     }
 
-    // Demo user: two owned appliances + one past order
-    // (powers the appliance-card view and the "previously purchased parts" picker)
-    const uid = Number(
-      db.prepare("INSERT INTO users (email, name) VALUES (?,?)")
-        .run("demo@example.com", "Demo User").lastInsertRowid
-    );
+    // ── Sample customers ───────────────────────────────────
+    // demo@example.com  — owns two appliances + a past order (full history)
+    // sarah@example.com — bought a refrigerator (appliance on file, filter orders)
+    // mike@example.com  — bought PARTS only → appliance inference kicks in on login
+    // lisa@example.com  — bought one Samsung part → inference suggests her fridge
+    const insUser = db.prepare("INSERT INTO users (email, name) VALUES (?,?)");
     const insUA = db.prepare(
       "INSERT INTO user_appliances (user_id, model_id, source) VALUES (?,?,?)"
     );
-    insUA.run(uid, modelIds.get("WDT780SAEM1")!, "purchased");
-    insUA.run(uid, modelIds.get("WRS325SDHZ01")!, "purchased");
-
-    const binId = partIds.get("PS11752778")!;
-    const oid = Number(
-      db.prepare("INSERT INTO orders (user_id, total, status, card_last4) VALUES (?,?,?,?)")
-        .run(uid, 36.18, "delivered", "4242").lastInsertRowid
+    const insOrder = db.prepare(
+      "INSERT INTO orders (user_id, total, status, card_last4) VALUES (?,?,?,?)"
     );
-    db.prepare(
+    const insItem = db.prepare(
       "INSERT INTO order_items (order_id, part_id, qty, unit_price) VALUES (?,?,?,?)"
-    ).run(oid, binId, 1, 36.18);
+    );
+    const placeOrder = (userId: number, items: [string, number][]) => {
+      const total = Math.round(
+        items.reduce((s, [no, qty]) => {
+          const p = parts.find((x) => x.part_no === no)!;
+          return s + p.price * qty;
+        }, 0) * 100
+      ) / 100;
+      const oid = Number(insOrder.run(userId, total, "delivered", "4242").lastInsertRowid);
+      for (const [no, qty] of items) {
+        const p = parts.find((x) => x.part_no === no)!;
+        insItem.run(oid, partIds.get(no)!, qty, p.price);
+      }
+    };
+
+    const demoId = Number(insUser.run("demo@example.com", "Demo User").lastInsertRowid);
+    insUA.run(demoId, modelIds.get("WDT780SAEM1")!, "purchased");
+    insUA.run(demoId, modelIds.get("WRS325SDHZ01")!, "purchased");
+    placeOrder(demoId, [["PS11752778", 1]]);
+
+    const sarahId = Number(insUser.run("sarah@example.com", "Sarah").lastInsertRowid);
+    insUA.run(sarahId, modelIds.get("WRF555SDFZ09")!, "purchased");
+    placeOrder(sarahId, [["PS9493452", 2]]);
+
+    const mikeId = Number(insUser.run("mike@example.com", "Mike").lastInsertRowid);
+    placeOrder(mikeId, [["PS11756710", 1], ["PS11722152", 2]]);
+
+    const lisaId = Number(insUser.run("lisa@example.com", "Lisa").lastInsertRowid);
+    placeOrder(lisaId, [["PS12172990", 1]]);
   });
   insertAll();
 

@@ -12,6 +12,7 @@ export type Address = {
 export type ClientEvent =
   | { type: "init" }
   | { type: "submit_email"; email: string }
+  | { type: "continue_guest" }
   | { type: "text"; text: string }
   | { type: "select_appliance"; modelNo: string }
   | { type: "menu_choice"; choice: "broken" | "preorder" | "install" }
@@ -33,7 +34,8 @@ export type ApplianceCard = {
   brand: string;
   applianceType: "refrigerator" | "dishwasher";
   name: string | null;
-  source: "purchased" | "searched";
+  /** purchased = owned; searched = looked up before; inferred = guessed from purchased parts */
+  source: "purchased" | "searched" | "inferred";
 };
 
 export type PartCard = {

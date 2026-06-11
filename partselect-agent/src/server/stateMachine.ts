@@ -11,7 +11,8 @@ import {
 } from "./services/orders";
 import {
   getAppliances, getPurchasedParts, getSavedAddress, recordSearch,
-  getOrCreateUserByEmail,
+  getOrCreateUserByEmail, createGuestUser, inferModelsFromPurchases,
+  upsertAppliance,
 } from "./services/users";
 import { charge } from "./services/payments";
 import { agentDiagnose, agentMatchParts, agentAnswer, type Emit } from "./agent";
@@ -178,12 +179,17 @@ function startCheckout(s: Session, emit: Emit): void {
 
 /** Deterministic intent routing for free text (zero-token shortcuts first, agent as fallback) */
 async function routeFreeText(s: Session, emit: Emit, text: string): Promise<void> {
+  // A bare email at any point switches/loads the account (guest → identified)
+  if (EMAIL_RE.test(text) && text.trim().split(/\s+/).length <= 3) {
+    identifyUser(s, emit, text);
+    return;
+  }
   const partNoMatch = text.match(PART_NO_RE);
   const modelMatch = text.match(MODEL_NO_RE);
   const wantsInstall = /install|installation/i.test(text);
   const wantsCompat = /compatib|\bfits?\b|work(s)? with|right for/i.test(text);
   const wantsBroken =
-    /broken|not working|won'?t|doesn'?t|stopped|stuck|fix|repair|leak|nois[ye]|not cooling|not draining|not drying|no ice|error code/i.test(text);
+    /broken|not working|won'?t|doesn'?t|stopped|stuck|fix|repair|leak|nois[ye]|not cooling|not draining|not drying|no ice|error code|clog|smell|odor|how (do|can) i clean|self.?clean/i.test(text);
   const wantsBuy = /\bbuy\b|\border\b|purchase|replacement|looking for|need a/i.test(text);
 
   // Shortcut 1: part number + install intent → installation card
@@ -354,18 +360,45 @@ function emitHome(s: Session, emit: Emit): void {
       })),
     });
     emit({ kind: "text", text: "Pick your appliance, or just type your question below:" });
+  } else {
+    // Customers who bought parts but never registered a machine:
+    // infer likely models from part compatibility and offer them
+    const inferred = inferModelsFromPurchases(s.userId);
+    if (inferred.length > 0) {
+      emit({
+        kind: "text",
+        text: "Based on the parts you've purchased, your appliance is likely one of these — pick yours and I can find matching parts right away:",
+      });
+      emit({
+        kind: "appliance_cards",
+        appliances: inferred.map((m) => ({
+          modelNo: m.model_no, brand: m.brand,
+          applianceType: m.appliance_type, name: m.name, source: "inferred" as const,
+        })),
+      });
+    }
   }
   emit({ kind: "menu" });
   s.stage = "menu";
 }
 
-/** Email gate: look up the account (and its purchase history) by email, or create one */
+/** Lazy guest creation: an unidentified user who just starts talking becomes a guest */
+function ensureUser(s: Session, emit: Emit): void {
+  if (s.userId !== 0) return;
+  s.userId = createGuestUser();
+  emit({
+    kind: "text",
+    text: "Continuing as a guest — everything works, I just won't have your purchase history. You can type your email anytime to load it.",
+  });
+}
+
+/** Email identification: load the account and its purchase history, or create one */
 function identifyUser(s: Session, emit: Emit, emailRaw: string): void {
   const match = emailRaw.match(EMAIL_RE);
   if (!match) {
     emit({
       kind: "text",
-      text: "That doesn't look like a valid email address — please try again:",
+      text: "That doesn't look like a valid email address — please try again, or continue as a guest:",
     });
     emit({ kind: "email_form" });
     s.stage = "await_email";
@@ -393,18 +426,23 @@ export async function handleEvent(
   ev: ClientEvent,
   emit: Emit
 ): Promise<void> {
-  // Identity gate: everything except init / email submission requires a known user,
-  // because carts, orders, and history are all keyed by the account
-  if (
-    s.userId === 0 &&
-    ev.type !== "init" &&
-    ev.type !== "submit_email" &&
-    !(ev.type === "text" && s.stage === "await_email")
-  ) {
-    emit({ kind: "text", text: "Please enter your email first so I can pull up your account:" });
-    emit({ kind: "email_form" });
-    emit({ kind: "done" });
-    return;
+  // Identity is optional: carts and orders need an account, so unidentified
+  // users are lazily promoted to a guest account instead of being blocked
+  if (s.userId === 0 && ev.type !== "init" && ev.type !== "submit_email") {
+    if (ev.type === "continue_guest") {
+      ensureUser(s, emit);
+      emitHome(s, emit);
+      emit({ kind: "done" });
+      return;
+    }
+    if (ev.type === "text" && s.stage === "await_email" && EMAIL_RE.test(ev.text)) {
+      identifyUser(s, emit, ev.text);
+      emit({ kind: "done" });
+      return;
+    }
+    // Any other action: become a guest and handle the event normally
+    ensureUser(s, emit);
+    if (s.stage === "await_email") s.stage = "menu";
   }
 
   switch (ev.type) {
@@ -415,7 +453,7 @@ export async function handleEvent(
       });
       emit({
         kind: "text",
-        text: "First, what's your email address? I'll use it to look up your appliances and order history.",
+        text: "Enter your email to load your appliances and order history, continue as a guest — or just ask your question right away:",
       });
       emit({ kind: "email_form" });
       s.stage = "await_email";
@@ -427,11 +465,20 @@ export async function handleEvent(
       break;
     }
 
+    case "continue_guest": {
+      ensureUser(s, emit);
+      emitHome(s, emit);
+      break;
+    }
+
     case "select_appliance": {
       const m = getModelByNo(ev.modelNo);
       if (m) {
         s.modelNo = m.model_no;
         s.applianceType = m.appliance_type;
+        // Remember the confirmed machine so it shows as a card on the next visit
+        // (upgraded to "owned" automatically when they purchase a part for it)
+        upsertAppliance(s.userId, m.model_no, "searched");
         emit({
           kind: "text",
           text: `✓ Selected: ${m.brand} ${m.model_no}${m.name ? ` (${m.name})` : ""}. How can I help?`,

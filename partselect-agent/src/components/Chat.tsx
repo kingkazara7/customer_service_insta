@@ -130,6 +130,7 @@ export default function Chat() {
         return (
           <EmailForm
             onSubmit={(email) => userEcho(email, { type: "submit_email", email })}
+            onGuest={() => userEcho("Continue as guest", { type: "continue_guest" })}
           />
         );
       case "appliance_cards":
