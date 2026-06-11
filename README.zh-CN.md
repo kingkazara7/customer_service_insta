@@ -148,7 +148,7 @@ Schema 见 [schema.sql](partselect-agent/src/server/db/schema.sql)。开发用 S
 
 ```
 appliance_models ──< compatibility >── parts ───1:1─── install_guides
-      (18)             (166 对)        (67)               (13)
+      (18)             (938 对)        (664)              (13)
         │                                │ │
         │                                │ └───< doc_chunks(16;可选关联零件,
         │                                │        embedding BLOB → 1024 维 Titan 向量)
@@ -165,15 +165,15 @@ appliance_models ──< compatibility >── parts ───1:1─── insta
 | 表 | 行数 | 说明 |
 |---|---|---|
 | `appliance_models` | 18 | 冰箱 9 + 洗碗机 9,7 个品牌 |
-| `parts` | 67 | **21 个从 partselect.com 摄入的真实零件**(真实 PS 号/价格/库存/症状)+ 合成种子(含 2 个零库存演示件、3 个清洁用品) |
-| `compatibility` | 166 | 零件↔型号对——兼容性的唯一权威来源 |
-| `install_guides` | 13 | 结构化:难度/分钟/工具/步骤/链接;其中 5 份用 partselect.com 的真实难度、耗时与 YouTube 视频增强 |
+| `parts` | 664 | **约 620 个从 partselect.com 摄入的真实零件**——5 个型号的完整目录全量采集(真实 PS 号/价格/库存/名称)+ 合成种子(含 2 个零库存演示件、3 个清洁用品) |
+| `compatibility` | 938 | 零件↔型号对——兼容性的唯一权威来源 |
+| `install_guides` | 13 | 结构化:难度/分钟/工具/步骤/链接;其中 6 份用 partselect.com 的真实难度、耗时与 YouTube 视频增强 |
 | `doc_chunks` | 16 | 维修+保养知识;生产环境 16 块全部用 Titan v2 嵌入(1024 维) |
 | `users` | 4 | demo / sarah / mike / lisa 样例人设(运行时另加游客) |
 | `user_appliances` | 3 | demo×2 已购、sarah×1 已购;mike/lisa 刻意留空 → 演示机型反推 |
 | `orders` / `order_items` | 4 / 5 | 种子购买历史,驱动个性化 |
 
-**真实数据摄入(已实现)。** `npm run db:seed && npm run ingest` 把 [data/ingested/real-parts.json](partselect-agent/data/ingested/real-parts.json)(WDT780SAEM1 与 WRS325SDHZ01 两个型号的真实目录采集)经 [scripts/ingest-real.ts](partselect-agent/scripts/ingest-real.ts) 灌入数据库。真实数据按零件号覆盖合成数据;两个厂家号撞上真实零件的编造 PS 号被原地重映射(行 id 不变,订单历史外键完好)。值得注意:partselect.com 对普通 HTTP 爬虫返回 **403**(curl 与两个服务端抓取器均验证),所以采集走的是真实浏览器会话——这一点为什么重要,见第十一章。
+**真实数据摄入(已实现)。** `npm run db:seed && npm run ingest` 把采集目录([data/ingested/](partselect-agent/data/ingested/))经 [scripts/ingest-real.ts](partselect-agent/scripts/ingest-real.ts) 灌入数据库:**5 个真实型号的完整零件目录**——WDT780SAEM1(155)、WRS325SDHZ01(254)、WDF520PADM7(138)、WRF555SDFZ09(232)、MDB4949SHZ(153)——逐页翻到底,约 800 条清单跨型号去重为约 620 个独立零件。真实数据按零件号覆盖合成数据;厂家号撞上真实零件的编造 PS 号被原地重映射(行 id 不变,订单外键完好)或清除。值得注意:partselect.com 对普通 HTTP 爬虫返回 **403**(curl 与两个服务端抓取器均验证),所以采集走的是真实浏览器会话内的同源 `fetch`——这一点为什么重要,见第十一章。
 
 **PostgreSQL 上"一样吗"?** 逻辑上完全一样——表、键、约束原样迁移。构成迁移工作量的是这些机械的方言差异:
 
@@ -229,7 +229,7 @@ appliance_models ──< compatibility >── parts ───1:1─── insta
 cd partselect-agent
 npm install
 npm run db:seed     # SQLite + 合成种子
-npm run ingest      # 合并 partselect.com 真实数据(合计 18 型号 / 67 零件 / 13 指南 / 16 知识块)
+npm run ingest      # 合并 partselect.com 真实数据(合计 18 型号 / 664 零件 / 938 兼容对)
 npm run dev         # http://localhost:3000(不配任何 key 也完整可用)
 npm run test:flow   # 41 项端到端断言
 ```
@@ -267,4 +267,4 @@ EC2 t3.small(nginx → systemd 托管的 Next.js,Let's Encrypt TLS,弹性 IP)· 
 
 **参考实现真正更强的地方——以及我们的回应。** 实时爬取让他拿到*整个* PartSelect 在线目录(约 200 万零件、实时价格)且零存储成本。这是广度上的真实优势,我们直说。但它同时是一个天花板:爬虫能读页面,却永远无法持有库存权威、写入订单、或在页面改版后保证兼容性判断——所以这条路线*无法*满足题目里交易那一半的要求,这也是作者把"依赖 HTML 结构"列为第一条缺点的原因。
 
-这个脆弱性已经不是假设:**截至 2026-06-11,partselect.com 对普通 HTTP 客户端返回 403**(curl 与两个独立的服务端抓取器均验证)。参考实现的逐请求爬取在今天的站点上已无法工作,而本系统依然从自有目录正常作答。我们则从另一个方向补齐了广度差距:**数据摄入契约已经落地**([scripts/ingest-real.ts](partselect-agent/scripts/ingest-real.ts))——通过真实浏览器会话(能通过拦截 HTTP 爬虫的反爬保护)采集了案例主力型号的真实目录切片(21 个真实零件:真实 PS 号、价格、库存状态、症状列表、安装难度与视频),并合并进事务型 schema。"广度 + 新鲜度"叠加在电商 Agent 之上——而不是替代它。
+这个脆弱性已经不是假设:**截至 2026-06-11,partselect.com 对普通 HTTP 客户端返回 403**(curl 与两个独立的服务端抓取器均验证)。参考实现的逐请求爬取在今天的站点上已无法工作,而本系统依然从自有目录正常作答。我们则从另一个方向补齐了广度差距:**数据摄入契约已经落地**([scripts/ingest-real.ts](partselect-agent/scripts/ingest-real.ts))——通过真实浏览器会话(能通过拦截 HTTP 爬虫的反爬保护)全量采集了 5 个真实型号的完整目录(约 620 个独立零件:真实 PS 号、价格、库存状态,主力零件另有真实症状、难度与安装视频),并合并进事务型 schema。"广度 + 新鲜度"叠加在电商 Agent 之上——而不是替代它。

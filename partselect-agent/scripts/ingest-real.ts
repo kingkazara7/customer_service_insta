@@ -20,7 +20,7 @@ import path from "node:path";
 import { getDb } from "../src/server/db/connection";
 
 type ListingPart = {
-  ps: string; mfr: string; name: string; price: number; stock: string; slug: string;
+  ps: string; mfr: string | null; name: string; price: number | string; stock: string | null; slug: string;
 };
 type Detail = {
   description: string; symptoms: string; difficulty: string;
@@ -47,21 +47,47 @@ function minutes(installTime: string | undefined): number {
   return 30;
 }
 
-function stockQty(stock: string, existing: number | undefined): number {
+function stockQty(stock: string | null, existing: number | undefined): number {
   if (stock === "In Stock") return existing && existing > 0 ? existing : 20;
   if (stock === "Special Order" || stock === "On Order") return 3;
   return 0;
 }
 
+/**
+ * Invented seed parts whose manufacturer numbers turned out to belong to
+ * different real parts. Safe to delete unless an order references them.
+ */
+const STALE_FAKES = ["PS11753783", "PS11770327"];
+
 function main() {
-  const raw = fs.readFileSync(
-    path.join(process.cwd(), "data", "ingested", "real-parts.json"),
-    "utf8"
-  );
-  const harvest = JSON.parse(raw) as Harvest;
+  const dir = path.join(process.cwd(), "data", "ingested");
+  const harvest = JSON.parse(
+    fs.readFileSync(path.join(dir, "real-parts.json"), "utf8")
+  ) as Harvest;
+  // Full model-parts harvest (5 models, ~800 parts) supersedes the listing
+  // slice in real-parts.json; details/remap still come from the base file.
+  const fullPath = path.join(dir, "real-parts-full.json");
+  if (fs.existsSync(fullPath)) {
+    const full = JSON.parse(fs.readFileSync(fullPath, "utf8")) as Pick<Harvest, "models">;
+    harvest.models = full.models;
+    console.log(`using full harvest: ${full.models.map((m) => `${m.modelNo}(${m.parts.length})`).join(", ")}`);
+  }
   const db = getDb();
 
   const run = db.transaction(() => {
+    // Remove invented seed parts whose mfr numbers collide with different real
+    // parts (skip any that an order references)
+    for (const fakeNo of STALE_FAKES) {
+      const row = db.prepare("SELECT id FROM parts WHERE part_no = ?").get(fakeNo) as { id: number } | undefined;
+      if (!row) continue;
+      const used = db.prepare("SELECT 1 FROM order_items WHERE part_id = ? LIMIT 1").get(row.id);
+      if (used) continue;
+      db.prepare("DELETE FROM compatibility WHERE part_id = ?").run(row.id);
+      db.prepare("DELETE FROM install_guides WHERE part_id = ?").run(row.id);
+      db.prepare("DELETE FROM carts WHERE part_id = ?").run(row.id);
+      db.prepare("DELETE FROM parts WHERE id = ?").run(row.id);
+      console.log(`removed stale fake ${fakeNo}`);
+    }
     // 1. Remap invented part numbers to their real PartSelect numbers in place
     for (const [fake, real] of Object.entries(harvest.remap)) {
       const fakeRow = db.prepare("SELECT id FROM parts WHERE part_no = ?").get(fake);
@@ -90,7 +116,8 @@ function main() {
           .prepare("SELECT id, stock_qty FROM parts WHERE part_no = ?")
           .get(p.ps) as { id: number; stock_qty: number } | undefined;
         const url = `https://www.partselect.com/${p.ps}-${detail?.slug ?? p.slug}.htm`;
-        const price = detail?.price ?? p.price;
+        const price = detail?.price ?? Number(p.price);
+        if (!Number.isFinite(price) || price <= 0) continue;
         const qty = stockQty(p.stock, existing?.stock_qty);
 
         let partId: number;
