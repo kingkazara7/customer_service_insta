@@ -1,162 +1,207 @@
-# PartSelect 配件助手 — Instalily 案例研究(中文设计文档)
+# PartSelect 配件助手
 
-> 本文档是 [README.md](README.md)(英文交付版)的中文对照版,供讲解与答辩使用。
-
-一个已部署上线的电商聊天客服,严格限定**冰箱**与**洗碗机**配件领域。完整购买旅程全部在一个聊天框内完成:身份识别 → 故障诊断 → 零件查找 → 兼容性确认 → 安装指导 → 购物车 → 结算 → 支付。
+一个已部署上线的电商聊天客服,严格限定**冰箱**与**洗碗机**配件领域。完整购买旅程全部在一个聊天框内完成:身份识别 →(可选拍照)→ 故障诊断或零件查找 → 兼容性确认 → 安装指导 → 购物车 → 结算 → 支付。
 
 **线上演示:** https://customerservice.lambdapen.com
-**演示账号:** `demo@example.com`(有家电与订单历史)· `mike@example.com`(只买过零件——观察机型反推)· 或直接游客访问。
+**试试看:** `demo@example.com`(有已购家电+订单历史)· `mike@example.com`(只买过零件——观察机型反推)· 或 **以游客访问** · 或点 **📷** 上传一张铭牌照片。
 
 ---
 
-## 一、我们做了什么
+## 目录
 
-| 模块 | 交付内容 |
+1. [我们包含了什么](#一我们包含了什么)
+2. [架构](#二架构)
+3. [状态机](#三状态机)
+4. [每个功能是如何实现的](#四每个功能是如何实现的)
+5. [数据库 schema](#五数据库-schema)
+6. [目录结构](#六目录结构)
+7. [运行](#七运行)
+8. [部署](#八部署)
+
+---
+
+## 一、我们包含了什么
+
+| 能力 | 概述 |
 |---|---|
-| **聊天 UI** | Next.js 16 + React 19,PartSelect 品牌配色(青绿/金黄),SSE 流式输出;富消息类型:家电卡片、零件卡片(价格/库存/兼容标签)、安装指南卡片、购物车抽屉、地址与支付表单、订单确认卡片 |
-| **身份系统** | 开场可选"邮箱 / 游客":邮箱载入购买历史;游客懒建档、绝不拦截任何操作;会话中输入裸邮箱可随时切换账号 |
-| **个性化** | 已购家电渲染成一键卡片;只买过零件的用户由**零件兼容性反推可能机型**("Likely yours");地址自动预填上次订单 |
-| **视觉识别** | 📷 上传**铭牌照片**(Claude 读出型号)或**坏零件照片**(Claude 识别零件)→ 直接进入型号查询/零件搜索流程;非家电照片被拒绝 |
-| **实时兜底** | 库里查不到型号/零件时,实时抓取 partselect.com 页面、解析、**写入目录**(自增长知识库);proxy-ready,优雅降级 |
+| **品牌化聊天 UI** | Next.js 16 + React 19,PartSelect 青绿/金黄配色,SSE 流式,丰富的交互消息类型(卡片、chips、表单) |
+| **身份(邮箱或游客)** | 邮箱载入购买历史;游客全功能且懒建档;会话中输入裸邮箱可切换账号 |
+| **个性化** | 已购家电渲染成一键卡片;只买过零件的用户由**零件兼容性反推可能机型**;地址自动预填上次订单 |
+| **视觉输入 📷** | 上传**铭牌照片**(读出型号)或**坏零件照片**(识别零件)→ 进入流程;非家电照片被拒绝 |
 | **故障诊断** | 先给带来源链接的自助排查步骤(RAG),再给可确认的替换零件卡片 |
-| **电商闭环** | 库存感知卡片("仅剩 N 件"/"缺货")、确认制加购、订单摘要、演示版 Visa 支付(Luhn 校验,**无真实扣款**)、事务化扣库存(防超卖) |
-| **自助保养** | 清洁/保养知识库(洗碗机滤网清洗、清洁片循环、除垢、冷凝器清洁),清洁用品本身作为可购买商品 |
-| **Agent** | Claude(Sonnet 4.5)on Amazon Bedrock,经 Claude Agent SDK 驱动,配 9 个只读 MCP 工具,且具备完整可用的无 LLM 降级模式 |
-| **检索** | 双层:结构化事实走精确 SQL,模糊知识走向量 RAG(Titan Embeddings v2,pgvector-ready),关键词检索自动兜底 |
-| **基础设施** | EC2(nginx + systemd + Let's Encrypt TLS + 自有域名),RDS PostgreSQL 已就绪待迁移,Bedrock 提供 LLM 与向量 |
-| **测试** | 43 项端到端断言:全部流程分支、案例三道例题、库存边界、防护栏、身份与视觉路径 |
+| **零件查询与搜索** | 按精确 PS 号、按故障症状、或按自然语言描述;已知型号时限定兼容件 |
+| **兼容性确认** | 来自关系型「零件↔型号」矩阵的精确答案——绝不猜测 |
+| **安装指导** | 结构化指南卡片(难度/耗时/工具/步骤/视频/说明书),零 token SQL 直查;模糊追问才进 LLM |
+| **电商** | 库存感知卡片("仅剩 N 件"/"缺货")、确认制加购、订单摘要、地址表单、**演示版 Visa 支付**(Luhn 校验、无真实扣款)、事务化下单 + 防超卖扣库存 |
+| **自助保养** | 清洁/除垢/冷凝器清洁知识,清洁用品本身作为可购买商品 |
+| **实时兜底** | 目录未命中时,实时抓取 partselect.com 页面、解析、**写入目录**(自增长);proxy-ready,默认关闭 |
+| **Agent** | Claude(Sonnet 4.5)on Amazon Bedrock,经 Claude Agent SDK;仅在 3 个模糊节点调用;**无 LLM 也完整可用的降级模式** |
+| **MCP 工具** | 9 个只读工具(开放标准,可复用、可远程化) |
+| **双层检索** | 结构化事实走精确 SQL + 向量 RAG(Titan Embeddings v2,pgvector-ready),关键词自动兜底 |
+| **真实目录数据** | 从 partselect.com 摄入约 620 个真实零件(真实 PS 号、价格、库存、症状、视频) |
+| **范围防护栏** | 三层防护把 Agent 锁定在冰箱/洗碗机配件 |
+| **测试** | 43 项自动化端到端断言 |
+| **部署** | EC2 + nginx + systemd + Let's Encrypt TLS + 自有域名;Bedrock 走 IAM |
 
 ---
 
-## 二、系统架构
+## 二、架构
 
 ```
-浏览器(Next.js 聊天 UI)
-   │  SSE(每轮:一个客户端事件进 → 一串服务端事件出)
+浏览器 — Next.js 聊天 UI(卡片、chips、表单、📷 上传)
+   │  SSE:一个 ClientEvent 进 → 一串 ServerEvent 出
    ▼
-/api/chat
-   ├── 状态机层(确定性,零 LLM token)────────┐
-   │   身份门 · 固定菜单 · M/P 模块 ·           │  两层调用的是
-   │   零件号/型号精确查询 · 结算 · 支付         │  同一套业务服务
-   │                                            │
-   └── Agent 层(Claude Agent SDK harness)─────┘
-       仅 3 个模糊节点:故障诊断 · 零件模糊匹配 · 自由问答
-       9 个只读 MCP 工具(写操作永不暴露)
-              │
-              ▼
-   services/(catalog · orders · users · payments)← 单一事实来源
-              │
-              ▼
-   SQLite(开发)/ RDS PostgreSQL + pgvector(生产路径)
-   Amazon Bedrock:Claude Sonnet 4.5(推理)· Titan Embeddings v2(向量)
+/api/chat(Next.js 路由,Node 运行时)
+   │
+   ▼
+状态机(stateMachine.ts —— 确定性,零 LLM token)
+   身份门 · 菜单 · M 模块(型号)· P 模块(零件)·
+   安装 · 购物车 · 结算 · 支付 · 意图捷径
+   │                                   │
+   │ 直接调用                          │ 把同一批函数包装成
+   ▼                                   ▼ 只读 MCP 工具
+服务层(catalog · orders · users · payments)  ◄── 单一事实来源
+   │
+   ├── Agent 层(agent/index.ts)—— 仅 3 个模糊节点:
+   │     诊断 · 零件模糊匹配 · 自由问答
+   │     Claude Agent SDK → Bedrock;降级为关键词 RAG + 模板
+   ├── 视觉(vision.ts)—— Bedrock Converse,图片 → 型号/零件
+   ├── RAG(rag.ts)—— 向量(Titan)优先,关键词兜底
+   └── 实时抓取(liveFetch.ts)—— 目录未命中 → 抓取+写入(proxy-ready)
+   │
+   ▼
+SQLite(开发 & 当前生产)/ RDS PostgreSQL + pgvector(迁移目标)
+Amazon Bedrock:Claude Sonnet 4.5(推理 + 视觉)· Titan Embeddings v2
 ```
 
----
-
-## 三、Agent 设计
-
-### 3.1 状态机 + LLM 混合,而非纯 Agent
-
-这是整个项目的定调决策。对话被建模为显式状态机([stateMachine.ts](partselect-agent/src/server/stateMachine.ts)),LLM 只在**恰好三个**真正需要自然语言理解的节点被调用:
-
-1. **故障诊断** — 自由文本症状 → 排查步骤 → 零件推荐
-2. **零件模糊匹配** — "门上放调料的那个盒子" → 候选零件(且仅在确定性搜索无果之后)
-3. **自由问答** — 安装追问、意图捷径分类不了的一切
-
-其余环节——三按钮菜单、"知道零件号吗"、型号收集、相近选项 chips、购物车、地址、支付——全部是确定性代码,输出带类型的 UI 事件。带来三个结果:
-
-- **Token 经济性:** 一次完整购买流程约 2–4k token,纯 Agent 方案约 20k;案例中两道零 token 例题(安装查询、兼容性确认)从头到尾不碰 LLM
-- **延迟:** 固定步骤毫秒级响应
-- **可预测性:** 结算流程不可能被模型漂移带偏
-
-任何自由文本先过确定性意图捷径再考虑 LLM:正则提取零件号(`PS\d+`)与型号,关键词路由安装/兼容/报修/购买意图。"Is **this part** compatible with my WDT780SAEM1?" 里的代词由会话状态(`lastPartNos`)消解,不靠模型。
-
-### 3.2 Harness:Claude Agent SDK on Bedrock
-
-Agent 跑在 **Claude Agent SDK**(`query()`)上,它提供 Agent 循环、MCP 工具分发、提示词缓存与流式输出。EC2 上通过 **Amazon Bedrock** 认证(`CLAUDE_CODE_USE_BEDROCK=1`),模型访问完全走 AWS IAM——服务链路中没有第三方 API key。模型只是一个环境变量(`AGENT_MODEL`),换供应商/换模型等于改一行配置。
-
-会话上下文以**一行画像摘要**注入("User appliances: … Previously purchased parts: …"),而不是回放聊天历史——个性化的 token 成本接近零。
-
-### 3.3 降级模式:演示永不挂
-
-每个 LLM 节点都有确定性兜底(关键词 RAG + 模板话术 + 症状搜索)。Bedrock 不可达、key 缺失、模型中途报错——同样的流程照常完成:卡片、结算、一切。这也是为什么在 Bedrock 模型权限审批通过之前,系统就已经可以完整演示。
-
-### 3.4 防护栏(三层相互独立)
-
-1. **提示词锁定范围:** 系统提示词将助手限定在冰箱/洗碗机配件,且强制兼容性与诊断结论必须来自工具调用
-2. **工具只读:** LLM 物理上无法改写状态——加购、下单、扣款只存在于用户点击确认的 UI 事件背后
-3. **事实确定性:** 兼容性答案永远来自 SQL 兼容性矩阵;模型只转述工具结果,绝不编造。超范围请求(线上实测:"给我写首诗")在 LLM 模式和降级模式下都会得到礼貌拒绝
-
-### 3.5 视觉输入([vision.ts](partselect-agent/src/server/vision.ts))
-
-铭牌/序列号字符串(`WDT780SAEM1`)极难手打,而顾客往往不知道零件的名字——所以这个领域最自然的输入就是照片。📷 按钮发送(前端已缩放的)图片,Agent 调用 **Bedrock Converse 的图像块**,模型返回一行结构化结果——`MODEL: …`、`PART: … | 冰箱/洗碗机` 或 `UNCLEAR: …`——直接路由进既有的 M 模块(型号查询)或零件搜索。线上实测:惠而浦铭牌照片解析为 `WRS325SDHZ01` 并继续流程;非家电图片被拒绝(范围防护栏延伸到了视觉)。无 LLM 时优雅降级为"请手动输入型号"。
-
-### 3.6 实时兜底与自增长目录([liveFetch.ts](partselect-agent/src/server/liveFetch.ts))
-
-当型号或零件号未命中本地目录,Agent 会说*"让我直接去 PartSelect 查一下…"*,用真实浏览器引擎(Playwright)抓取在线页面,用**采集那 620 个零件时同一套解析逻辑**解析,写入目录(`ingestLivePart` / `ensureModel`),再从新写入的行作答——一个越用越全的知识库。
-
-**诚实的运维警告,因为它很重要:** partselect.com 的边缘反爬对**数据中心 IP 返回 403**——已验证连 EC2 上的真实无头 Chromium 都被"Access Denied"。这正是击垮竞品 HTTP 爬虫的同一堵墙。所以可靠的实时抓取需要住宅出口:设 `SCRAPE_PROXY_URL` 指向住宅代理,真实浏览器引擎就能通过。该功能默认关闭(`LIVE_FETCH=1` 开启),被拦截时优雅降级到目录答案——所以 EC2 演示上机制就位且 proxy-ready,而**自有目录**才是让系统稳健的根本,不依赖外部站点。
+**决定一切的核心设计:** 对话是一个显式**状态机**,而 **LLM 只在自然语言真正需要理解的地方被调用**——三个节点。其余环节(菜单、"知道零件号吗"、型号收集、购物车、地址、支付)全部是确定性代码,输出带类型的 UI 事件。结果:一次完整购买流程约 2–4k token(纯 Agent 方案约 20k),固定步骤毫秒级响应,结算流程不可能被模型漂移带偏。状态机和 Agent 调用的是**同一批服务函数**——单一事实来源、两个消费者。
 
 ---
 
-## 四、MCP 设计
+## 三、状态机
 
-### 4.1 形态
+各阶段(`Session.stage`,见 [session.ts](partselect-agent/src/server/session.ts))及其转移。`⓪`=零 LLM token,`Ⓛ`=LLM 节点,`Ⓥ`=视觉(Bedrock)。
 
-业务能力放在四个纯 TypeScript 服务模块里——[catalog](partselect-agent/src/server/services/catalog.ts)、[orders](partselect-agent/src/server/services/orders.ts)、[users](partselect-agent/src/server/services/users.ts)、[payments](partselect-agent/src/server/services/payments.ts)。一个薄薄的包装层([mcp/index.ts](partselect-agent/src/server/mcp/index.ts))用 SDK 的 `createSdkMcpServer` + `tool()`(zod 模式)把其中**只读子集**注册为进程内 MCP server:
+```
+                          ┌─────────────┐
+   init / submit_image ──►│ await_email │  邮箱 → 载入账号与历史 ⓪Ⓓ
+   (任意操作懒建为游客)    └──────┬──────┘  游客 → 新账号;裸邮箱 → 切换
+                                 │
+                                 ▼
+                          ┌─────────────┐   家电卡片(已购/反推)+
+                          │    menu     │◄── 三按钮菜单 + 自由输入 + 📷  ⓪
+                          └──┬───┬───┬──┘
+        ┌────────────────────┘   │   └────────────────────┐
+     "损坏"                  "预购"                    "安装"
+        │                       │                          │
+        ▼                       ▼                          ▼
+   需要型号? ──┐      知道零件号吗? ◆            ┌─ 点选已购零件 ⓪
+        │ 否   │ 是      是 │      │ 否            └─ 或输入零件号
+        ▼      │            ▼      ▼                      │
+ ┌────────────┐│      ┌────────────┐ 需要型号             ▼
+ │await_model ││      │await_partno│     │           ┌──────────────┐
+ └─────┬──────┘│      └─────┬──────┘     ▼           │ install_pick │
+       │ ⟦M⟧   │            │ ⟦P⟧  ┌──────────────┐  └──────┬───────┘
+       ▼       │            ▼      │await_part_desc│         ▼  ⟦P⟧
+ ┌──────────────┐    ┌────────────┐└──────┬───────┘  install_card ⓪Ⓓ
+ │await_fault_  │    │  零件卡片  │       │ ⓪→Ⓛ            │
+ │   desc       │    │ ⟦P 模块⟧   │       ▼                ▼
+ └──────┬───────┘    └─────┬──────┘  零件卡片 ⟦P⟧    ┌────────────┐
+        ▼ Ⓛ+RAG            │                          │ install_qa │ Ⓛ
+ 自助排查步骤 +            │                          └─────┬──────┘
+ 零件卡片 ⟦P⟧              │                                │ "要订购吗?"
+        └──────────────────┴──────────────┬───────────────┘
+                                           ▼
+                              [ 加入购物车 ](确认制加购)⓪
+                                           ▼
+                                  ┌─────────────────┐
+                                  │ awaiting_confirm│ 订单摘要 ⓪
+                                  └────────┬────────┘
+                                           ▼ 是
+                                  ┌─────────────────┐
+                                  │  await_address  │ 表单(预填)⓪
+                                  └────────┬────────┘
+                                           ▼
+                                  ┌─────────────────┐
+                                  │  await_payment  │ 演示 Visa(Luhn)⓪
+                                  └────────┬────────┘
+                                           ▼ 事务:下单 + 扣库存 ⓪Ⓓ
+                                    订单确认 → 回主菜单
+```
 
-| 工具 | 用途 |
-|---|---|
-| `search_parts` | 症状/描述 → 零件,可限定型号(只返回兼容件) |
-| `get_part_details` | 零件号 → 详情、价格、库存、适配型号 |
-| `check_compatibility` | **唯一**可信的兼容性来源 |
-| `search_repair_guides` | 故障排查知识库 RAG |
-| `get_install_guide` | 结构化指南:难度/耗时/工具/步骤/视频/说明书 |
-| `find_similar_models` | 型号查不到时给相近选项 |
-| `get_parts_for_model` | 某型号全部兼容零件 |
-| `get_order_status` / `get_recent_orders` | 当前用户的订单查询 |
+**⟦M 模块⟧(型号查询):** 查到 → 按 intent 续走 · 查不到 →(开启则实时抓取)→ 相近型号 chips → "都不是" → 致歉 → 主菜单。
+**⟦P 模块⟧(零件 + 库存):** 有库存 → 卡片含价格 + "加入购物车" · 低库存 → "仅剩 N 件" · 无库存 → 提示 + 替代 · 查不到 →(开启则实时抓取)→ 相近零件 chips → 致歉。
 
-### 4.2 设计原则
-
-- **单一事实来源。** 状态机直接调用服务函数(零 token);Agent 经 MCP 触达*同一批函数*。一份实现、两个消费者——修一个查询,两条路径同时受益
-- **写操作不是工具。** `addToCart`、`createOrder`、`charge` 被刻意排除在 MCP 面之外。这是机制级安全保证,不是提示词层面的承诺
-- **Token 形状的返回值。** 工具输出是裁剪过的投影(`slimPart`)——不返回原始行、不带无用列,把工具结果占用的上下文压到最小
-- **现在进程内,将来可远程。** SDK MCP server 目前跑在 Node 进程内(无子进程/网络开销)。但 MCP 本质是线协议,同一套工具定义可以原样提升为独立 HTTP MCP 服务、独立部署与扩缩容——或者被完全不同的客户端复用(内部客服工作台、支持团队的 Claude Desktop),工具代码一行不改
+**视觉与自由文本是入口捷径**,不是独立阶段:照片(`submit_image`)或自由文本消息被分类后路由*进入*上面的阶段——例如铭牌照片跳进 ⟦M⟧,"How do I install PS11752778?" 直达 `install_card`,"制冰机不工作" 进入损坏分支。
 
 ---
 
-## 五、数据库设计与 schema 合理性
+## 四、每个功能是如何实现的
 
-Schema 见 [schema.sql](partselect-agent/src/server/db/schema.sql)。开发用 SQLite,全程保持 ANSI 兼容 SQL,因此规划中的 RDS PostgreSQL 迁移只需替换连接模块(RDS 实例已就绪,pgvector-ready)。
+### 4.1 聊天传输与 UI
+- **每轮一次 SSE**([api/chat/route.ts](partselect-agent/src/app/api/chat/route.ts)):POST 进一个 `ClientEvent`,处理器以 `data:` 帧流式输出 `ServerEvent`。会话 id 通过 `x-session-id` 响应头下发、客户端带回。
+- **带类型协议**([protocol.ts](partselect-agent/src/shared/protocol.ts))前后端共享——`ClientEvent`(用户操作)与 `ServerEvent`(`text`、`agent_delta`、`appliance_cards`、`part_cards`、`install_card`、`cart`、`order_summary`、`address_form`、`payment_form`、`email_form` 等)。新增 UI = 一个类型 + 一个渲染器([Cards.tsx](partselect-agent/src/components/Cards.tsx))+ 一个状态机分支。
+- **流式文本**把 `agent_delta` 帧合并进同一个增长气泡([Chat.tsx](partselect-agent/src/components/Chat.tsx))。
 
-### 5.1 每张表为什么这样设计
+### 4.2 身份(邮箱或游客)
+- [users.ts](partselect-agent/src/server/services/users.ts) 的 `getOrCreateUserByEmail` 与 `createGuestUser`。会话以 `userId = 0`(未识别)开始。
+- 状态机守卫([stateMachine.ts](partselect-agent/src/server/stateMachine.ts))把未识别用户的任意操作**懒建为游客**——绝不拦截。邮箱载入账号;陌生邮箱建档("Welcome / Account created");会话中输入裸邮箱即切换账号。
+- 游客就是 `email = NULL` 的普通行,所以游客模式无需改 schema。
 
-**`parts`** — 目录核心。关键列:
-- `stock_qty` 驱动整个库存体验:"现货"/"仅剩 N 件"(≤5)/"缺货"三态、加购拦截、下单时事务扣减。库存放在数据库而不是提示词文本里,LLM 永远不可能"卖出"一个没货的零件
-- `symptoms`(逗号分隔短语)让零件**可以按问题被发现**("ice maker not working"),而不只是按名称——它支撑零 LLM 的确定性症状搜索,同时充当排序信号(症状命中权重高于名称命中)
-- `part_no`(PartSelect 号)是聊天里约定俗成的"外键";`mfr_part_no` 对应真实顾客拿厂家号交叉查询的习惯
+### 4.3 个性化与机型反推
+- `getAppliances` 把已购/查询过的机器渲染成卡片。
+- 对买过零件但没登记机器的用户,`inferModelsFromPurchases` 执行 `已购零件 → 兼容性 → 候选机型,按匹配数排序`,以 "Likely yours" 卡片呈现。
+- `profileSummary` 把**一行**画像注入 Agent 上下文,而非回放聊天历史——个性化的 token 成本接近零。
 
-**`appliance_models` + `compatibility`** — 经典多对多联结表。兼容性是**关系数据,不是文本**,因为"适不适配"必须精确回答——错答一个"是"就是一单退货。这张联结表还让反向查询同样便宜:*型号查零件*(预购浏览)和*零件查型号*——后者正是只买过零件用户的**机型反推**实现(`已购零件 → 兼容性 → 候选机型,按匹配数排序`)。
+### 4.4 视觉输入 📷
+- [vision.ts](partselect-agent/src/server/vision.ts):前端把图片缩到 ≤1024px JPEG,`handleImage` 调用 **Bedrock Converse** 的图像块。模型返回恰好一行——`MODEL: <型号>`、`PART: <描述> | <家电>` 或 `UNCLEAR: <原因>`——路由进 ⟦M 模块⟧ 或零件搜索。
+- 范围防护栏延伸到图片:非家电照片返回 `UNCLEAR`。无 LLM → 优雅降级为"请手动输入型号"。
 
-**`install_guides`** — 刻意做成*独立结构化表*而非文本块。难度、分钟数、工具、有序步骤是形态稳定的事实;结构化存储意味着安装分支是**零 token 的 SQL 直查**,前端直接渲染成卡片。视频/说明书 URL 是普通列——链接是 payload 不是语义,永远不参与 embedding。
+### 4.5 诊断(损坏分支)
+- `agentDiagnose`([agent/index.ts](partselect-agent/src/server/agent/index.ts)):先调 `search_repair_guides`(RAG)给自助排查步骤,再调 `search_parts`(限定型号),输出一行 `RECOMMEND:` 零件号,由状态机渲染成卡片。
+- **降级模式:** 无 LLM 时退回关键词 RAG(`retrieveChunks`)+ 症状搜索 + 模板话术——每条分支照样跑完。
 
-**`doc_chunks`** — 非结构化的第二层(维修指南、说明书节选、视频字幕)。每块带 `symptom_tags`(检索信号)、`source_url` + `source_ref`(页码/时间戳——回答可以标注来源)、`embedding` BLOB(Float32;pgvector 下变成 `vector(1024)`,进程内余弦换成 `<=>` 操作符)。**结构化事实进 SQL、模糊知识进向量**的双层划分,正是 Agent 设计在 schema 层的镜像:精确问题精确答,模糊问题走检索。
+### 4.6 零件查询、搜索与兼容性
+- [catalog.ts](partselect-agent/src/server/services/catalog.ts) 的 `getPartByNo`、`searchParts`(症状加权,可选型号限定)、`checkCompatibility`。
+- **兼容性是关系型的、绝不猜测**——读 `compatibility` 联结表。错答一个"是"就是一单退货,所以这是唯一不允许 LLM 即兴发挥的事(由系统提示词与"`check_compatibility` 是唯一兼容性工具"双重强制)。
+- 未命中时由前缀递减给出相近匹配(`findSimilarModels` / `findSimilarParts`)。
 
-**`users` / `user_appliances`** — 身份与个性化闭环。`user_appliances.source` 这个小枚举承担了实际工作:`purchased`(已购——任何更新都不会降级)、`searched`(会话中确认过)。机型反推在查询时实时计算而非落库——这样建议永远反映最新的兼容性数据。游客就是 `email = NULL` 的普通行——这也是游客模式不需要改任何 schema 的原因。
+### 4.7 安装指导
+- `getInstallGuide` 返回结构化行(难度、分钟、工具、有序步骤、视频、说明书)。安装分支以**零 token SQL 直查**渲染成卡片;只有模糊追问("要先断水吗?")才进 Agent。
 
-**`carts` / `orders` / `order_items`** — 标准电商范式,加两个刻意的决定:`order_items.unit_price` **在下单时刻快照价格**(目录价会变,订单历史不能变);订单创建在**单个事务**里完成"复核库存 → 扣减 → 写订单 → 清购物车 → 会话机型升级为已购"——超卖竞态在数据库层关死,不靠应用层的侥幸。
+### 4.8 电商(购物车 → 结算 → 支付)
+- [orders.ts](partselect-agent/src/server/services/orders.ts):`addToCart` 强制校验库存;`createOrder` 在**单个事务**内——复核库存 → 扣减 → 写订单+明细(`unit_price` 快照)→ 清购物车 → 会话机型升级"已购"。超卖竞态在 DB 层关死。
+- [payments.ts](partselect-agent/src/server/services/payments.ts):**仅演示**的 `validateVisa`(4 开头、16 位、Luhn)+ `charge` 返回假凭证——**无真实网关、无真实扣款**。按网关适配器形状设计,换 Stripe 只改一处。
+- 库存状态驱动 UI:`lowStock`(≤5 → "仅剩 N 件")、`outOfStock`(禁止加购)、现货标签。
 
-**`search_history`** — 只追加的行为日志,供画像摘要与未来分析使用(例如"搜过某型号两次但没买"→ 低置信度持有推断)。
+### 4.9 自助保养知识
+- 维修/保养 `doc_chunks`(洗碗机滤网清洗、除垢、冷凝器清洁、异味)+ 清洁用品(affresh 清洁片、除垢剂、冷凝器刷)作为真实可购买零件入库——所以"我该怎么清洁?"既给步骤又给商品。
 
-### 5.2 为什么 SQLite → PostgreSQL,而不用独立向量库
+### 4.10 实时兜底与自增长目录
+- [liveFetch.ts](partselect-agent/src/server/liveFetch.ts):目录未命中时,`tryLiveModel` / `tryLivePart` 用真实浏览器引擎(Playwright)抓取在线页面,用**采集那 620 个零件时同一套逻辑**解析,`ingestLivePart` / `ensureModel` 写入目录——再从新写入的行作答。
+- **诚实的运维现实(已写入文档):** partselect.com 对**数据中心 IP 返回 403**——已验证连 EC2 上的真实无头 Chromium 都被"Access Denied"。所以可靠的实时抓取需要住宅出口(`SCRAPE_PROXY_URL`)。该功能默认关闭(`LIVE_FETCH=1`),被拦截时优雅降级到目录答案;**自有目录**才是让系统稳健的根本。
 
-目录规模(10²–10⁴ 零件)下,独立向量数据库只增加运维依赖、不带来可感知收益。pgvector 让向量**与过滤条件同库**——一条 SQL 同时完成 `appliance_type = 'dishwasher' AND part_id = …` 过滤与相似度排序。`EmbeddingProvider` 接口(生产 Bedrock Titan v2、离线可选本地模型、`none` → 关键词兜底)保证检索层可整体替换而调用方无感。
+### 4.11 Agent 层与 MCP 工具
+- Agent([agent/index.ts](partselect-agent/src/server/agent/index.ts))在 **Bedrock**(`CLAUDE_CODE_USE_BEDROCK=1`,模型由 `AGENT_MODEL` 指定)上运行 **Claude Agent SDK**(`query()`),模型访问走 AWS IAM——服务链路无第三方 key。
+- **9 个只读 MCP 工具**([mcp/index.ts](partselect-agent/src/server/mcp/index.ts)):`search_parts`、`get_part_details`、`check_compatibility`、`search_repair_guides`、`get_install_guide`、`find_similar_models`、`get_parts_for_model`、`get_order_status`、`get_recent_orders`。写操作(加购、下单、扣款)**刻意不是工具**——机制级安全保证,不是提示词承诺。返回值做了裁剪投影以压小上下文。
 
-### 5.3 数据库的*当前*形态(SQLite,迁移前)
+### 4.12 双层检索(RAG)
+- [rag.ts](partselect-agent/src/server/rag.ts):有向量时对 `doc_chunks` 做余弦相似度检索;否则退回关键词搜索——调用方无感。
+- [embeddings/provider.ts](partselect-agent/src/server/embeddings/provider.ts):可替换的 `EmbeddingProvider`——生产 **Bedrock Titan v2**(1024 维)、离线可选本地模型、或 `none` → 关键词兜底。`npm run embed` 生成向量。
 
-把现状说精确:**整个系统——包括生产环境 EC2——目前完全跑在 SQLite 上**(单个 WAL 模式文件 `data/partselect.db`)。RDS PostgreSQL 已建好但尚未接入(已列为下一项工程任务)。两个引擎上的*逻辑* schema 完全一致;迁移时变的是方言,不是设计。
+### 4.13 范围防护栏(三层)
+1. **提示词锁定范围**——系统提示词将 Agent 限定在冰箱/洗碗机配件,强制兼容性/诊断必须调用工具。
+2. **工具只读**——LLM 物理上无法改写状态。
+3. **事实确定性**——兼容性来自 SQL;模型只转述工具结果,绝不编造。超范围文本*与*非家电照片在 LLM 模式和降级模式下都会被拒绝。
 
-**实体关系总览:**
+### 4.14 真实数据摄入
+- [scripts/ingest-real.ts](partselect-agent/scripts/ingest-real.ts) 回放 [data/ingested/](partselect-agent/data/ingested/)——5 个真实型号的完整零件目录(经真实浏览器会话采集)——按零件号 upsert。厂家号撞上真实零件的编造种子号被原地重映射(行 id 不变,订单历史外键完好)。
+
+---
+
+## 五、数据库 schema
+
+开发与当前生产用 SQLite;全程 ANSI 兼容 SQL,因此 RDS PostgreSQL 迁移只需替换连接模块(实例已就绪,pgvector-ready)。Schema:[schema.sql](partselect-agent/src/server/db/schema.sql)。
 
 ```
 appliance_models ──< compatibility >── parts ───1:1─── install_guides
@@ -172,128 +217,61 @@ appliance_models ──< compatibility >── parts ───1:1─── insta
                                    └──< carts(结算时清空)
 ```
 
-**当前数据量(种子 + 真实数据摄入;生产环境还会持续累积游客、搜索与真实订单):**
-
-| 表 | 行数 | 说明 |
-|---|---|---|
-| `appliance_models` | 18 | 冰箱 9 + 洗碗机 9,7 个品牌 |
-| `parts` | 664 | **约 620 个从 partselect.com 摄入的真实零件**——5 个型号的完整目录全量采集(真实 PS 号/价格/库存/名称)+ 合成种子(含 2 个零库存演示件、3 个清洁用品) |
-| `compatibility` | 938 | 零件↔型号对——兼容性的唯一权威来源 |
-| `install_guides` | 13 | 结构化:难度/分钟/工具/步骤/链接;其中 6 份用 partselect.com 的真实难度、耗时与 YouTube 视频增强 |
-| `doc_chunks` | 16 | 维修+保养知识;生产环境 16 块全部用 Titan v2 嵌入(1024 维) |
-| `users` | 4 | demo / sarah / mike / lisa 样例人设(运行时另加游客) |
-| `user_appliances` | 3 | demo×2 已购、sarah×1 已购;mike/lisa 刻意留空 → 演示机型反推 |
-| `orders` / `order_items` | 4 / 5 | 种子购买历史,驱动个性化 |
-
-**真实数据摄入(已实现)。** `npm run db:seed && npm run ingest` 把采集目录([data/ingested/](partselect-agent/data/ingested/))经 [scripts/ingest-real.ts](partselect-agent/scripts/ingest-real.ts) 灌入数据库:**5 个真实型号的完整零件目录**——WDT780SAEM1(155)、WRS325SDHZ01(254)、WDF520PADM7(138)、WRF555SDFZ09(232)、MDB4949SHZ(153)——逐页翻到底,约 800 条清单跨型号去重为约 620 个独立零件。真实数据按零件号覆盖合成数据;厂家号撞上真实零件的编造 PS 号被原地重映射(行 id 不变,订单外键完好)或清除。值得注意:partselect.com 对普通 HTTP 爬虫返回 **403**(curl 与两个服务端抓取器均验证),所以采集走的是真实浏览器会话内的同源 `fetch`——这一点为什么重要,见第十一章。
-
-**PostgreSQL 上"一样吗"?** 逻辑上完全一样——表、键、约束原样迁移。构成迁移工作量的是这些机械的方言差异:
-
-| SQLite(现在) | PostgreSQL(目标) |
-|---|---|
-| `INTEGER PRIMARY KEY AUTOINCREMENT` | `GENERATED ALWAYS AS IDENTITY` |
-| `TEXT DEFAULT (datetime('now'))` | `timestamptz DEFAULT now()` |
-| `embedding BLOB`(Float32 LE) | `embedding vector(1024)` + HNSW 索引 |
-| 进程内算余弦(rag.ts) | SQL 里 `ORDER BY embedding <=> $1` |
-| `COLLATE NOCASE` 查询 | `citext` 类型或 `ILIKE` |
-| `better-sqlite3` 同步驱动 | `pg` 异步连接池——真正的重构面 |
+每张表为什么这样设计:
+- **`parts.stock_qty`** 驱动整个库存体验与下单扣减——库存放数据库而非提示词文本,LLM 永远不可能"卖"没货的零件。**`parts.symptoms`** 让零件可按问题被发现,同时充当排序信号。
+- **`compatibility`** 是多对多联结表,因为"适不适配"必须精确;同一张表支撑反向查询(`型号查零件`,以及只买过零件用户的机型反推)。
+- **`install_guides`** 是独立的*结构化*表(非文本),所以安装卡片是零 token SQL 直查;视频/说明书 URL 是 payload 不参与 embedding。
+- **`doc_chunks`** 是非结构化层——`symptom_tags`、`source_url`+`source_ref`(回答中标注来源)、`embedding` BLOB(pgvector 下变 `vector(1024)`)。结构化事实进 SQL + 模糊知识进向量,正是 Agent 设计在 schema 层的镜像。
+- **`order_items.unit_price`** 在下单时刻快照价格;下单是单事务(复核库存 → 扣减 → 写入 → 清购物车),超卖在 DB 层关死。
 
 ---
 
-## 六、扩展性与可伸缩性
+## 六、目录结构
 
-| 变更 | 改动半径 |
-|---|---|
-| 新增品类(烤箱) | 种子数据 + `appliance_type` 枚举值——流程、工具、UI 全部品类无关 |
-| 新增能力(退换货、保修) | 一个新服务模块 + 一次 MCP 工具注册 |
-| 真实支付 | 替换 payments 适配器(接口已按网关形状设计) |
-| 换 LLM 供应商/模型 | 一个环境变量(Agent SDK 抽象了提供商) |
-| 真实身份认证 | 在 `identifyUser` 后插入验证步骤(魔法链接/验证码)——缝已留好 |
-| 水平扩展 | 会话 Map → Redis(一个文件);进程内 MCP → 独立 HTTP MCP 服务;SQLite → RDS(换连接模块);无状态 Next.js 挂负载均衡 |
-| 真实 PartSelect 数据 | 种子脚本*就是*数据摄入契约——爬虫对准同样的数组结构灌数据即可 |
-
-协议先行的设计处处受益:前后端共享的带类型 `ClientEvent`/`ServerEvent` 契约([protocol.ts](partselect-agent/src/shared/protocol.ts)),新增卡片类型或操作 = 一个类型 + 一个渲染器 + 一个状态机分支。
+```
+partselect-agent/
+├── src/app/                # Next.js 页面 + /api/chat SSE 路由
+├── src/components/         # Chat.tsx + Cards.tsx(全部消息类型)
+├── src/shared/protocol.ts  # 带类型的 ClientEvent / ServerEvent 契约
+├── src/server/
+│   ├── stateMachine.ts     # 确定性流程核心(M/P 模块、意图、结算)
+│   ├── session.ts          # 会话状态(内存 Map;Redis-ready)
+│   ├── vision.ts           # Bedrock Converse 图片 → 型号/零件
+│   ├── liveFetch.ts        # 目录未命中实时抓取(Playwright,proxy-ready)
+│   ├── rag.ts              # 向量优先、关键词兜底检索
+│   ├── agent/              # Claude Agent SDK + 降级模式 + 范围防护栏
+│   ├── mcp/                # 9 个只读 MCP 工具
+│   ├── services/           # catalog · orders · users · payments(事实来源)
+│   ├── embeddings/         # Bedrock Titan / 本地 provider 抽象
+│   └── db/                 # schema.sql + seed.ts
+├── scripts/                # seed · ingest-real · embed · test-flow(43 断言)
+└── data/ingested/          # 采集的 partselect.com 真实目录
+```
 
 ---
 
-## 七、对话流程(已实现)
-
-- **开场:** 邮箱/游客二选一(游客在首次操作时懒建档——绝不拦截)→ 个性化家电卡片(已购,或由已购零件反推)→ 三按钮菜单 + 自由输入兜底
-- **报修:** 收集型号(M 模块:查不到 → 相近选项 → 致歉)→ 症状描述 → 带来源的排查步骤 → 零件卡片
-- **预购:** 知道零件号 → 精确查询;不知道 → 型号 + 描述 → 先确定性搜索,无果才进 LLM
-- **安装:** 零件号或从已购零件点选 → 结构化指南卡片(零 token)→ 模糊追问进 Agent → "顺便订购这个零件吗?"
-- **P 模块(全局):** 价格先展示、用户确认才入购物车;低库存与缺货状态;相近零件 chips;致歉兜底
-- **结算:** 摘要确认 → 地址(预填)→ 演示 Visa(4 开头 + 16 位 + Luhn)→ 事务化下单 → 购买历史反哺下次会话的卡片
-
-## 八、案例例题覆盖(全部验证,见 [test-flow.ts](partselect-agent/scripts/test-flow.ts))
-
-| 查询 | 路径 | 用 LLM? |
-|---|---|---|
-| "How can I install part number PS11752778?" | 意图捷径 → SQL 安装卡片 | 否——0 token |
-| "Is this part compatible with my WDT780SAEM1?" | 代词消解 → 兼容性矩阵 → 不兼容(冰箱件) | 否——0 token |
-| "The ice maker on my Whirlpool fridge is not working…" | 报修意图 → 收型号 → RAG + 诊断 → 零件卡片 | 诊断节点 |
-| "My dishwasher is clogged, how do I clean it?" | 诊断 → 自助保养指南(滤网清洗、清洁片循环)+ 清洁用品购买卡片 | 诊断节点 |
-| "Write me a poem" | 防护栏 → 礼貌拒绝 | — |
-
-## 九、本地运行
+## 七、运行
 
 ```bash
 cd partselect-agent
 npm install
 npm run db:seed     # SQLite + 合成种子
-npm run ingest      # 合并 partselect.com 真实数据(合计 18 型号 / 664 零件 / 938 兼容对)
+npm run ingest      # 合并 partselect.com 真实数据 → 18 型号 / 664 零件 / 938 兼容对
 npm run dev         # http://localhost:3000(不配任何 key 也完整可用)
-npm run test:flow   # 41 项端到端断言
+npm run test:flow   # 43 项端到端断言
 ```
 
-可选:设 `ANTHROPIC_API_KEY` 或 `CLAUDE_CODE_USE_BEDROCK=1` 启用真实 LLM;`EMBEDDINGS_PROVIDER=bedrock npm run embed` 启用向量检索。
+可选能力(环境变量):
+- `ANTHROPIC_API_KEY` **或** `CLAUDE_CODE_USE_BEDROCK=1`(+ `AGENT_MODEL`)→ 真实 Claude 推理与视觉。
+- `EMBEDDINGS_PROVIDER=bedrock npm run embed` → Titan 向量 RAG。
+- `LIVE_FETCH=1`(+ `SCRAPE_PROXY_URL` 住宅代理)→ 实时兜底抓取。
 
-## 十、部署(us-east-2)与后续
-
-EC2 t3.small(nginx → systemd 托管的 Next.js,Let's Encrypt TLS,弹性 IP)· Bedrock 经 IAM 限权凭证 · RDS PostgreSQL 已就绪。资源清单:`DEPLOY-INFO.md`。
-
-已知后续:SQLite→RDS 迁移(服务层异步 pg 重构)、可验证的身份认证、真实目录数据摄入。
+不配任何 key 时,应用仍以降级模式(关键词 RAG + 模板)端到端运行。
 
 ---
 
-## 十一、与公开参考实现的对比
+## 八、部署
 
-我们研究了两个公开实现,并与其中更强的一个做了基准对比。以下事实均来自其源码与(若有)作者幻灯片。
+线上 **https://customerservice.lambdapen.com**:EC2 t3.small 用 **systemd** 托管 Next.js,前面是 **nginx**(SSE 关缓冲)+ **Let's Encrypt** 证书,绑弹性 IP;**Bedrock**(Claude Sonnet 4.5 + Titan v2)走 IAM 限权凭证;**RDS PostgreSQL** 已为迁移就绪。资源清单见 `DEPLOY-INFO.md`。部署顺序 = `db:seed → ingest → embed → systemctl restart partselect`。
 
-### 11a. 对比 [gmunhoz0810/PartSelect-LLM-Assistant](https://github.com/gmunhoz0810/PartSelect-LLM-Assistant)
-
-GPT-4o + FastAPI,作者配有幻灯片讲解。
-
-**他的设计一句话概括:** 纯 Agent——每个查询都过 GPT-4o,配 4 个 OpenAI 函数调用工具**实时爬取 partselect.com**(BeautifulSoup 解析 CSS 选择器);SQLite 只用来存对话日志;前端是部署在 GitHub Pages 上的非流式聊天。
-
-| 维度 | 本项目 | 参考实现 |
-|---|---|---|
-| **对题目范围的覆盖** | 信息**与交易**:购物车、库存、结算、支付、订单历史——题目明确要求 "assist with customer transactions" | 仅信息查询;无购物车/结算——购买要去 partselect.com 完成 |
-| **架构** | 状态机 + Agent 混合;LLM 只在 3 个模糊节点被触达 | 纯 Agent;任何查询(哪怕"PS11752778 的信息")都是一次 LLM 往返 |
-| **成本/延迟画像** | 确定性路径:0 token、毫秒级;案例三道例题中两道从不调用 LLM | 作者自报数据:平均约 7 秒,型号查询 9–13 秒;每个查询都付 GPT-4o 的钱 |
-| **数据层** | 自有事务型目录:库存权威、防超卖订单、价格快照 | 没有目录——作者幻灯片原话:*"Very dependent on current PS website html structure"*;一次改版全部工具失效 |
-| **兼容性回答** | 关系矩阵,精确 SQL | 从 PS 页面爬取(HTML 不变时准确) |
-| **RAG** | 双层:结构化 SQL + 向量检索(Titan/pgvector 路径),带来源标注与关键词兜底 | 无——维修内容按请求实时爬取 |
-| **身份与个性化** | 邮箱/游客账号、购买历史、家电卡片、**由已购零件反推机型**、地址预填 | 无(匿名,50 条消息上限) |
-| **用户体验** | SSE 流式;交互组件(带库存标签的零件卡片、确认制加购、表单) | 非流式纯文本/markdown;作者自述约 1% 的回复媒体格式渲染错误 |
-| **韧性** | 无 LLM 降级模式可完成全部流程;防护栏是机制级的(只读工具) | 硬依赖 OpenAI 可用性 + PS HTML 稳定性;防护栏是提示词级的 |
-| **工具层** | 9 个只读 MCP 工具(开放标准,可被其他客户端复用、可提升为远程服务) | 4 个定制 OpenAI 函数;作者把"只有 4 个工具"列为自身局限 |
-| **测试** | 41 项自动化端到端断言(可进 CI) | 人工抽查(单个查询"10/10 次正确") |
-| **部署** | AWS 自有域名 + TLS(EC2/nginx/systemd),Bedrock 走 IAM | GitHub Pages 前端 + 本地运行的后端(有 Procfile) |
-
-**参考实现真正更强的地方——以及我们的回应。** 实时爬取让他拿到*整个* PartSelect 在线目录(约 200 万零件、实时价格)且零存储成本。这是广度上的真实优势,我们直说。但它同时是一个天花板:爬虫能读页面,却永远无法持有库存权威、写入订单、或在页面改版后保证兼容性判断——所以这条路线*无法*满足题目里交易那一半的要求,这也是作者把"依赖 HTML 结构"列为第一条缺点的原因。
-
-这个脆弱性已经不是假设:**截至 2026-06-11,partselect.com 对普通 HTTP 客户端返回 403**(curl 与两个独立的服务端抓取器均验证)。参考实现的逐请求爬取在今天的站点上已无法工作,而本系统依然从自有目录正常作答。我们则从另一个方向补齐了广度差距:**数据摄入契约已经落地**([scripts/ingest-real.ts](partselect-agent/scripts/ingest-real.ts))——通过真实浏览器会话(能通过拦截 HTTP 爬虫的反爬保护)全量采集了 5 个真实型号的完整目录(约 620 个独立零件:真实 PS 号、价格、库存状态,主力零件另有真实症状、难度与安装视频),并合并进事务型 schema。"广度 + 新鲜度"叠加在电商 Agent 之上——而不是替代它。
-
-### 11b. 对比 [annielouu/ecommerce_chat_agent](https://github.com/annielouu/ecommerce_chat_agent)
-
-两个里更强的一个——同样用 **Claude Agent SDK**(claude-haiku-4-5,beta `tool_runner`),配 ChromaDB RAG、自增长知识库(`fetch_page` 缓存抓到的页面)、Playwright-stealth 跨 5 个品牌域 + Serper 全网搜索、范围防护栏,**还有一个视觉变体**(`AppWithVision.js`)。它是一个真正不错的*检索/研究*型 Agent。它(据其 README)明确不做的:购物车、结算、账号、流式。
-
-我们最初对比时,它有两个我们没有的功能——**视觉**和**实时全网兜底**。两个我们都补上了:
-
-| 它有而我们当时没有的功能 | 现状 |
-|---|---|
-| 视觉(图片输入) | ✅ 已实现(§3.5)——Bedrock Converse 读铭牌型号 + 识别零件,线上实测;范围防护栏延伸到图片 |
-| 实时抓取 + 自增长 KB | ✅ 已实现(§3.6)——目录未命中 → 实时抓 partselect → 写入 → 作答;proxy-ready、优雅降级 |
-
-至此检索侧的差距已补平,而**交易、身份、库存权威、流式、部署、自动化测试**的优势仍归我们。两点公平说明:它的 Serper 集成搜的是*多个品牌域*(whirlpool.com、samsung.com…),我们则限定 partselect;它的自增长用独立 ChromaDB,我们则增长关系型目录(这是有意选择——我们长出来的数据是可交易使用的,不只是可检索)。结论:两个项目是两个物种——检索型 Agent 与电商型 Agent——而对一道主职能写明"提供产品信息**并协助客户交易**"的题,我们覆盖了两半,同时补齐了它的检索招牌功能。
+**下一步:** SQLite → RDS 迁移(服务层异步 `pg` 重构 + `doc_chunks` 上 pgvector)。
