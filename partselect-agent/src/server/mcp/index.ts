@@ -46,7 +46,7 @@ export const catalogServer = createSdkMcpServer({
         model_no: z.string().optional().describe("Appliance model number, e.g. WDT780SAEM1"),
       },
       async (args) => {
-        const rows = searchParts({
+        const rows = await searchParts({
           query: args.query,
           applianceType: args.appliance_type,
           modelNo: args.model_no,
@@ -59,9 +59,9 @@ export const catalogServer = createSdkMcpServer({
       "Look up a part by PartSelect number (e.g. PS11752778): details, price, stock, and the list of compatible models.",
       { part_no: z.string() },
       async (args) => {
-        const part = getPartByNo(args.part_no);
+        const part = await getPartByNo(args.part_no);
         if (!part) return text({ found: false, part_no: args.part_no });
-        const models = getCompatibleModels(args.part_no).map((m) => m.model_no);
+        const models = (await getCompatibleModels(args.part_no)).map((m) => m.model_no);
         return text({ found: true, ...slimPart(part), compatible_models: models });
       }
     ),
@@ -70,7 +70,7 @@ export const catalogServer = createSdkMcpServer({
       "Check whether a part fits an appliance model. This is the ONLY trusted source for compatibility — never answer compatibility from memory.",
       { part_no: z.string(), model_no: z.string() },
       async (args) => {
-        const r = checkCompatibility(args.part_no, args.model_no);
+        const r = await checkCompatibility(args.part_no, args.model_no);
         return text({
           compatible: r.compatible,
           part_found: r.partFound,
@@ -91,7 +91,7 @@ export const catalogServer = createSdkMcpServer({
         part_no: z.string().optional(),
       },
       async (args) => {
-        const rows = searchDocChunks({
+        const rows = await searchDocChunks({
           query: args.query,
           applianceType: args.appliance_type,
           partNo: args.part_no,
@@ -110,7 +110,7 @@ export const catalogServer = createSdkMcpServer({
       "Get the installation guide for a part: difficulty, time, tools, step-by-step instructions, video and manual links.",
       { part_no: z.string() },
       async (args) => {
-        const g = getInstallGuide(args.part_no);
+        const g = await getInstallGuide(args.part_no);
         return text(g ?? { found: false, part_no: args.part_no });
       }
     ),
@@ -120,7 +120,7 @@ export const catalogServer = createSdkMcpServer({
       { model_no: z.string() },
       async (args) =>
         text(
-          findSimilarModels(args.model_no).map((m) => ({
+          (await findSimilarModels(args.model_no)).map((m) => ({
             model_no: m.model_no,
             brand: m.brand,
             type: m.appliance_type,
@@ -132,14 +132,14 @@ export const catalogServer = createSdkMcpServer({
       "get_parts_for_model",
       "List all parts compatible with an appliance model.",
       { model_no: z.string() },
-      async (args) => text(getPartsForModel(args.model_no).map(slimPart))
+      async (args) => text((await getPartsForModel(args.model_no)).map(slimPart))
     ),
     tool(
       "get_order_status",
       "Look up the status and line items of one of the current user's orders.",
       { order_id: z.number(), user_id: z.number() },
       async (args) => {
-        const o = getOrderStatus(args.user_id, args.order_id);
+        const o = await getOrderStatus(args.user_id, args.order_id);
         return text(o ?? { found: false, order_id: args.order_id });
       }
     ),
@@ -147,7 +147,7 @@ export const catalogServer = createSdkMcpServer({
       "get_recent_orders",
       "List the current user's recent orders.",
       { user_id: z.number() },
-      async (args) => text(getRecentOrders(args.user_id))
+      async (args) => text(await getRecentOrders(args.user_id))
     ),
   ],
 });

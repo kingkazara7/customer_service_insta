@@ -1,4 +1,4 @@
-import { getDb, initSchema } from "./connection";
+import { db, initSchema } from "./connection";
 
 type ModelRow = [string, string, "refrigerator" | "dishwasher", string];
 // model_no, brand, type, display name
@@ -716,68 +716,55 @@ const chunks: ChunkRow[] = [
   },
 ];
 
-function seed() {
-  initSchema();
-  const db = getDb();
+async function seed() {
+  await initSchema();
+  const conn = db();
 
-  const wipe = db.transaction(() => {
-    for (const t of [
+  await conn.tx(async (t) => {
+    for (const tbl of [
       "order_items", "orders", "carts", "search_history", "user_appliances",
       "users", "doc_chunks", "install_guides", "compatibility", "parts", "appliance_models",
-    ]) db.prepare(`DELETE FROM ${t}`).run();
-  });
-  wipe();
+    ]) await t.exec(`DELETE FROM ${tbl}`);
 
-  const insertAll = db.transaction(() => {
-    const insModel = db.prepare(
-      "INSERT INTO appliance_models (model_no, brand, appliance_type, name) VALUES (?,?,?,?)"
-    );
     const modelIds = new Map<string, number>();
     for (const [model_no, brand, type, name] of models) {
-      const r = insModel.run(model_no, brand, type, name);
-      modelIds.set(model_no, Number(r.lastInsertRowid));
+      const r = await t.get<{ id: number }>(
+        "INSERT INTO appliance_models (model_no, brand, appliance_type, name) VALUES (?,?,?,?) RETURNING id",
+        [model_no, brand, type, name]
+      );
+      modelIds.set(model_no, r!.id);
     }
 
-    const insPart = db.prepare(
-      `INSERT INTO parts (part_no, mfr_part_no, name, description, appliance_type, brand, price, stock_qty, product_url, symptoms)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`
-    );
-    const insCompat = db.prepare(
-      "INSERT INTO compatibility (part_id, model_id) VALUES (?,?)"
-    );
     const partIds = new Map<string, number>();
     for (const p of parts) {
-      const r = insPart.run(
-        p.part_no, p.mfr, p.name, p.desc, p.type, p.brand, p.price, p.stock,
-        `https://www.partselect.com/${p.part_no}.htm`, p.symptoms
+      const r = await t.get<{ id: number }>(
+        `INSERT INTO parts (part_no, mfr_part_no, name, description, appliance_type, brand, price, stock_qty, product_url, symptoms)
+         VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id`,
+        [p.part_no, p.mfr, p.name, p.desc, p.type, p.brand, p.price, p.stock,
+         `https://www.partselect.com/${p.part_no}.htm`, p.symptoms]
       );
-      const id = Number(r.lastInsertRowid);
-      partIds.set(p.part_no, id);
+      partIds.set(p.part_no, r!.id);
       for (const m of p.fits) {
         const mid = modelIds.get(m);
-        if (mid) insCompat.run(id, mid);
+        if (mid) await t.exec("INSERT INTO compatibility (part_id, model_id) VALUES (?,?)", [r!.id, mid]);
       }
     }
 
-    const insGuide = db.prepare(
-      `INSERT INTO install_guides (part_id, difficulty, est_time_minutes, tools, steps_json, video_url, manual_url)
-       VALUES (?,?,?,?,?,?,?)`
-    );
     for (const g of guides) {
-      insGuide.run(
-        partIds.get(g.part_no)!, g.difficulty, g.minutes, g.tools,
-        JSON.stringify(g.steps), g.video ?? null, g.manual ?? null
+      await t.exec(
+        `INSERT INTO install_guides (part_id, difficulty, est_time_minutes, tools, steps_json, video_url, manual_url)
+         VALUES (?,?,?,?,?,?,?)`,
+        [partIds.get(g.part_no)!, g.difficulty, g.minutes, g.tools,
+         JSON.stringify(g.steps), g.video ?? null, g.manual ?? null]
       );
     }
 
-    const insChunk = db.prepare(
-      `INSERT INTO doc_chunks (source_type, part_id, appliance_type, symptom_tags, chunk_text, source_url, source_ref)
-       VALUES (?,?,?,?,?,?,?)`
-    );
     for (const c of chunks) {
-      insChunk.run(
-        c.source_type, c.part_no ? partIds.get(c.part_no)! : null,
-        c.appliance_type, c.symptom_tags, c.text, c.source_url ?? null, c.source_ref ?? null
+      await t.exec(
+        `INSERT INTO doc_chunks (source_type, part_id, appliance_type, symptom_tags, chunk_text, source_url, source_ref)
+         VALUES (?,?,?,?,?,?,?)`,
+        [c.source_type, c.part_no ? partIds.get(c.part_no)! : null,
+         c.appliance_type, c.symptom_tags, c.text, c.source_url ?? null, c.source_ref ?? null]
       );
     }
 
@@ -786,54 +773,45 @@ function seed() {
     // sarah@example.com — bought a refrigerator (appliance on file, filter orders)
     // mike@example.com  — bought PARTS only → appliance inference kicks in on login
     // lisa@example.com  — bought one Samsung part → inference suggests her fridge
-    const insUser = db.prepare("INSERT INTO users (email, name) VALUES (?,?)");
-    const insUA = db.prepare(
-      "INSERT INTO user_appliances (user_id, model_id, source) VALUES (?,?,?)"
-    );
-    const insOrder = db.prepare(
-      "INSERT INTO orders (user_id, total, status, card_last4) VALUES (?,?,?,?)"
-    );
-    const insItem = db.prepare(
-      "INSERT INTO order_items (order_id, part_id, qty, unit_price) VALUES (?,?,?,?)"
-    );
-    const placeOrder = (userId: number, items: [string, number][]) => {
+    const newUser = async (email: string, name: string) =>
+      (await t.get<{ id: number }>("INSERT INTO users (email, name) VALUES (?,?) RETURNING id", [email, name]))!.id;
+    const addAppliance = (uid: number, model: string, src: string) =>
+      t.exec("INSERT INTO user_appliances (user_id, model_id, source) VALUES (?,?,?)", [uid, modelIds.get(model)!, src]);
+    const placeOrder = async (userId: number, items: [string, number][]) => {
       const total = Math.round(
-        items.reduce((s, [no, qty]) => {
-          const p = parts.find((x) => x.part_no === no)!;
-          return s + p.price * qty;
-        }, 0) * 100
+        items.reduce((s, [no, qty]) => s + parts.find((x) => x.part_no === no)!.price * qty, 0) * 100
       ) / 100;
-      const oid = Number(insOrder.run(userId, total, "delivered", "4242").lastInsertRowid);
+      const oid = (await t.get<{ id: number }>(
+        "INSERT INTO orders (user_id, total, status, card_last4) VALUES (?,?,?,?) RETURNING id",
+        [userId, total, "delivered", "4242"]
+      ))!.id;
       for (const [no, qty] of items) {
         const p = parts.find((x) => x.part_no === no)!;
-        insItem.run(oid, partIds.get(no)!, qty, p.price);
+        await t.exec("INSERT INTO order_items (order_id, part_id, qty, unit_price) VALUES (?,?,?,?)",
+          [oid, partIds.get(no)!, qty, p.price]);
       }
     };
 
-    const demoId = Number(insUser.run("demo@example.com", "Demo User").lastInsertRowid);
-    insUA.run(demoId, modelIds.get("WDT780SAEM1")!, "purchased");
-    insUA.run(demoId, modelIds.get("WRS325SDHZ01")!, "purchased");
-    placeOrder(demoId, [["PS11752778", 1]]);
+    const demoId = await newUser("demo@example.com", "Demo User");
+    await addAppliance(demoId, "WDT780SAEM1", "purchased");
+    await addAppliance(demoId, "WRS325SDHZ01", "purchased");
+    await placeOrder(demoId, [["PS11752778", 1]]);
 
-    const sarahId = Number(insUser.run("sarah@example.com", "Sarah").lastInsertRowid);
-    insUA.run(sarahId, modelIds.get("WRF555SDFZ09")!, "purchased");
-    placeOrder(sarahId, [["PS9493452", 2]]);
+    const sarahId = await newUser("sarah@example.com", "Sarah");
+    await addAppliance(sarahId, "WRF555SDFZ09", "purchased");
+    await placeOrder(sarahId, [["PS9493452", 2]]);
 
-    const mikeId = Number(insUser.run("mike@example.com", "Mike").lastInsertRowid);
-    placeOrder(mikeId, [["PS11756710", 1], ["PS11722152", 2]]);
+    const mikeId = await newUser("mike@example.com", "Mike");
+    await placeOrder(mikeId, [["PS11756710", 1], ["PS11722152", 2]]);
 
-    const lisaId = Number(insUser.run("lisa@example.com", "Lisa").lastInsertRowid);
-    placeOrder(lisaId, [["PS12172990", 1]]);
+    const lisaId = await newUser("lisa@example.com", "Lisa");
+    await placeOrder(lisaId, [["PS12172990", 1]]);
   });
-  insertAll();
 
-  const counts = {
-    models: models.length,
-    parts: parts.length,
-    guides: guides.length,
-    chunks: chunks.length,
-  };
-  console.log("Seed complete:", JSON.stringify(counts));
+  console.log("Seed complete:", JSON.stringify({
+    models: models.length, parts: parts.length, guides: guides.length, chunks: chunks.length,
+  }));
+  process.exit(0);
 }
 
-seed();
+seed().catch((e) => { console.error(e); process.exit(1); });

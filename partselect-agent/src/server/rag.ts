@@ -1,4 +1,4 @@
-import { getDb } from "./db/connection";
+import { db } from "./db/connection";
 import { searchDocChunks, type DocChunk } from "./services/catalog";
 import { getEmbeddingProvider, cosineSim, blobToVec } from "./embeddings/provider";
 
@@ -18,20 +18,19 @@ export async function retrieveChunks(opts: {
   const provider = getEmbeddingProvider();
   if (provider) {
     try {
-      const db = getDb();
-      const params: Record<string, string> = {};
+      const params: unknown[] = [];
       let sql = `SELECT id, source_type, part_id, appliance_type, symptom_tags,
                         chunk_text, source_url, source_ref, embedding
                  FROM doc_chunks WHERE embedding IS NOT NULL`;
       if (opts.applianceType) {
-        sql += " AND appliance_type = @atype";
-        params["atype"] = opts.applianceType;
+        sql += " AND appliance_type = ?";
+        params.push(opts.applianceType);
       }
       if (opts.partNo) {
-        sql += " AND part_id = (SELECT id FROM parts WHERE part_no = @pno COLLATE NOCASE)";
-        params["pno"] = opts.partNo.trim();
+        sql += " AND part_id = (SELECT id FROM parts WHERE LOWER(part_no) = LOWER(?))";
+        params.push(opts.partNo.trim());
       }
-      const rows = db.prepare(sql).all(params) as (DocChunk & { embedding: Buffer })[];
+      const rows = await db().all<DocChunk & { embedding: Buffer }>(sql, params);
       if (rows.length > 0) {
         const [qv] = await provider.embed([opts.query]);
         const scored = rows

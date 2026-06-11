@@ -32,10 +32,10 @@ function applianceTypeName(t: string): string {
   return t === "refrigerator" ? "refrigerator" : "dishwasher";
 }
 
-function toCard(p: Part, sessionModelNo?: string): PartCard {
+async function toCard(p: Part, sessionModelNo?: string): Promise<PartCard> {
   let compatible: boolean | null = null;
   if (sessionModelNo) {
-    compatible = checkCompatibility(p.part_no, sessionModelNo).compatible;
+    compatible = (await checkCompatibility(p.part_no, sessionModelNo)).compatible;
   }
   return {
     partNo: p.part_no,
@@ -43,7 +43,7 @@ function toCard(p: Part, sessionModelNo?: string): PartCard {
     name: p.name,
     brand: p.brand,
     applianceType: p.appliance_type,
-    price: p.price,
+    price: Number(p.price),
     stockQty: p.stock_qty,
     lowStock: p.stock_qty > 0 && p.stock_qty <= 5,
     outOfStock: p.stock_qty <= 0,
@@ -52,8 +52,8 @@ function toCard(p: Part, sessionModelNo?: string): PartCard {
   };
 }
 
-function cartView(userId: number): CartView {
-  const c = getCart(userId);
+async function cartView(userId: number): Promise<CartView> {
+  const c = await getCart(userId);
   return {
     items: c.items.map((i) => ({
       partNo: i.part_no, name: i.name, price: i.price, qty: i.qty, lineTotal: i.line_total,
@@ -63,7 +63,7 @@ function cartView(userId: number): CartView {
   };
 }
 
-function guideView(g: NonNullable<ReturnType<typeof getInstallGuide>>): InstallGuideView {
+function guideView(g: NonNullable<Awaited<ReturnType<typeof getInstallGuide>>>): InstallGuideView {
   return {
     partNo: g.part_no, partName: g.part_name, difficulty: g.difficulty,
     estTimeMinutes: g.est_time_minutes, tools: g.tools, steps: g.steps,
@@ -72,10 +72,10 @@ function guideView(g: NonNullable<ReturnType<typeof getInstallGuide>>): InstallG
 }
 
 /** P module: part cards with stock states (in stock → card; out of stock → notice) */
-function emitPartCards(s: Session, emit: Emit, parts: Part[]): void {
+async function emitPartCards(s: Session, emit: Emit, parts: Part[]): Promise<void> {
   if (parts.length === 0) return;
   s.lastPartNos = parts.map((p) => p.part_no).slice(0, 5);
-  emit({ kind: "part_cards", parts: parts.map((p) => toCard(p, s.modelNo)) });
+  emit({ kind: "part_cards", parts: await Promise.all(parts.map((p) => toCard(p, s.modelNo))) });
   const oos = parts.filter((p) => p.stock_qty <= 0);
   for (const p of oos) {
     emit({
@@ -87,15 +87,15 @@ function emitPartCards(s: Session, emit: Emit, parts: Part[]): void {
 
 /** P module: full lookup path for a part number */
 async function lookupPartFlow(s: Session, emit: Emit, partNoInput: string): Promise<void> {
-  const part = getPartByNo(partNoInput);
-  recordSearch(s.userId, partNoInput, s.modelNo, part?.part_no);
+  const part = await getPartByNo(partNoInput);
+  await recordSearch(s.userId, partNoInput, s.modelNo, part?.part_no);
   if (part) {
-    emitPartCards(s, emit, [part]);
+    await emitPartCards(s, emit, [part]);
     return;
   }
   // Not in the local catalog → try a live fetch from partselect.com before giving up
   if (await tryLivePart(s, emit, partNoInput)) return;
-  const similar = findSimilarParts(partNoInput);
+  const similar = await findSimilarParts(partNoInput);
   if (similar.length > 0) {
     emit({
       kind: "text",
@@ -117,16 +117,16 @@ async function tryLivePart(s: Session, emit: Emit, partNo: string): Promise<bool
   emit({ kind: "text", text: `Let me check PartSelect directly for ${partNo}…` });
   const live = await fetchPart(partNo);
   if (!live || !live.appliance_type) return false;
-  ingestLivePart({
+  await ingestLivePart({
     part_no: live.ps, mfr_part_no: live.mfr, name: live.name,
     description: live.description, appliance_type: live.appliance_type,
     brand: null, price: live.price, stock: live.stock, product_url: live.url,
     modelNo: s.modelNo,
   });
-  const part = getPartByNo(live.ps);
+  const part = await getPartByNo(live.ps);
   if (!part) return false;
   emit({ kind: "text", text: "Found it on PartSelect — added to our catalog:" });
-  emitPartCards(s, emit, [part]);
+  await emitPartCards(s, emit, [part]);
   return true;
 }
 
@@ -136,9 +136,9 @@ async function tryLiveModel(s: Session, emit: Emit, modelNo: string): Promise<bo
   emit({ kind: "text", text: `Let me check PartSelect directly for model ${modelNo}…` });
   const live = await fetchModel(modelNo);
   if (!live) return false;
-  ensureModel(live.modelNo, live.brand, live.appliance_type);
+  await ensureModel(live.modelNo, live.brand, live.appliance_type);
   for (const p of live.parts) {
-    ingestLivePart({
+    await ingestLivePart({
       part_no: p.ps, mfr_part_no: p.mfr, name: p.name,
       appliance_type: live.appliance_type, brand: live.brand,
       price: p.price, stock: p.stock,
@@ -155,14 +155,14 @@ async function tryLiveModel(s: Session, emit: Emit, modelNo: string): Promise<bo
 
 /** M module: model lookup → found: continue by intent; not found: similar options; none → apology */
 async function modelLookupFlow(s: Session, emit: Emit, modelInput: string): Promise<void> {
-  let model = getModelByNo(modelInput);
+  let model = await getModelByNo(modelInput);
   if (!model && (await tryLiveModel(s, emit, modelInput))) {
-    model = getModelByNo(modelInput);
+    model = await getModelByNo(modelInput);
   }
   if (model) {
     s.modelNo = model.model_no;
     s.applianceType = model.appliance_type;
-    recordSearch(s.userId, modelInput, model.model_no);
+    await recordSearch(s.userId, modelInput, model.model_no);
     emit({
       kind: "text",
       text: `✓ Model confirmed: ${model.brand} ${model.model_no}${model.name ? ` (${model.name})` : ""}`,
@@ -170,7 +170,7 @@ async function modelLookupFlow(s: Session, emit: Emit, modelInput: string): Prom
     proceedAfterModel(s, emit);
     return;
   }
-  const similar = findSimilarModels(modelInput);
+  const similar = await findSimilarModels(modelInput);
   if (similar.length > 0) {
     emit({
       kind: "text",
@@ -211,8 +211,8 @@ function backToMenu(s: Session, emit: Emit): void {
   emit({ kind: "menu" });
 }
 
-function startCheckout(s: Session, emit: Emit): void {
-  const cart = cartView(s.userId);
+async function startCheckout(s: Session, emit: Emit): Promise<void> {
+  const cart = await cartView(s.userId);
   if (cart.items.length === 0) {
     emit({ kind: "text", text: "Your cart is empty — let's find the parts you need first." });
     backToMenu(s, emit);
@@ -231,7 +231,7 @@ function startCheckout(s: Session, emit: Emit): void {
 async function routeFreeText(s: Session, emit: Emit, text: string): Promise<void> {
   // A bare email at any point switches/loads the account (guest → identified)
   if (EMAIL_RE.test(text) && text.trim().split(/\s+/).length <= 3) {
-    identifyUser(s, emit, text);
+    await identifyUser(s, emit, text);
     return;
   }
   const partNoMatch = text.match(PART_NO_RE);
@@ -293,14 +293,14 @@ async function routeFreeText(s: Session, emit: Emit, text: string): Promise<void
     return;
   }
   // Shortcut 7: bare model number → set session context
-  if (modelMatch && getModelByNo(modelMatch[0])) {
-    s.modelNo = modelMatch[0].toUpperCase();
-    const m = getModelByNo(s.modelNo)!;
-    s.applianceType = m.appliance_type;
-    recordSearch(s.userId, text, s.modelNo);
+  const bareModel = modelMatch ? await getModelByNo(modelMatch[0]) : undefined;
+  if (bareModel) {
+    s.modelNo = bareModel.model_no;
+    s.applianceType = bareModel.appliance_type;
+    await recordSearch(s.userId, text, s.modelNo);
     emit({
       kind: "text",
-      text: `✓ Got it — your appliance is the ${m.brand} ${m.model_no}. What do you need?`,
+      text: `✓ Got it — your appliance is the ${bareModel.brand} ${bareModel.model_no}. What do you need?`,
     });
     emit({ kind: "menu" });
     return;
@@ -324,8 +324,8 @@ async function answerCompatibility(
     });
     return;
   }
-  const r = checkCompatibility(partNo, modelNo);
-  recordSearch(s.userId, `compat ${partNo} ${modelNo}`, modelNo, partNo);
+  const r = await checkCompatibility(partNo, modelNo);
+  await recordSearch(s.userId, `compat ${partNo} ${modelNo}`, modelNo, partNo);
   if (!r.partFound) {
     await lookupPartFlow(s, emit, partNo);
     return;
@@ -340,7 +340,7 @@ async function answerCompatibility(
       kind: "text",
       text: `✅ Compatible! The ${r.part!.name} (${partNo}) fits your ${r.model!.brand} ${r.model!.model_no}.`,
     });
-    emitPartCards(s, emit, [r.part!]);
+    await emitPartCards(s, emit, [r.part!]);
   } else {
     emit({
       kind: "text",
@@ -350,15 +350,15 @@ async function answerCompatibility(
 }
 
 async function showInstallGuide(s: Session, emit: Emit, partNo: string): Promise<void> {
-  const part = getPartByNo(partNo);
+  const part = await getPartByNo(partNo);
   if (!part) {
     await lookupPartFlow(s, emit, partNo);
     return;
   }
-  const guide = getInstallGuide(partNo);
+  const guide = await getInstallGuide(partNo);
   s.installPartNo = part.part_no;
   s.lastPartNos = [part.part_no]; // enables pronoun resolution ("is this part compatible…")
-  recordSearch(s.userId, `install ${partNo}`, s.modelNo, part.part_no);
+  await recordSearch(s.userId, `install ${partNo}`, s.modelNo, part.part_no);
   if (guide) {
     emit({ kind: "install_card", guide: guideView(guide) });
     s.stage = "install_qa";
@@ -379,13 +379,12 @@ async function showInstallGuide(s: Session, emit: Emit, partNo: string): Promise
 
 async function handleFaultDesc(s: Session, emit: Emit, text: string): Promise<void> {
   pushHistory(s, "user", text);
-  recordSearch(s.userId, text, s.modelNo);
+  await recordSearch(s.userId, text, s.modelNo);
   const partNos = await agentDiagnose(s, text, emit);
-  const parts = partNos
-    .map((no) => getPartByNo(no))
+  const parts = (await Promise.all(partNos.map((no) => getPartByNo(no))))
     .filter((p): p is Part => !!p);
   if (parts.length > 0) {
-    emitPartCards(s, emit, parts);
+    await emitPartCards(s, emit, parts);
     emit({
       kind: "text",
       text: "Once you've confirmed a part, tap “Add to Cart” on its card. You can also keep describing other symptoms.",
@@ -424,19 +423,19 @@ async function handleImage(
       kind: "text",
       text: `That looks like: **${result.description}**. Here's what I found${s.modelNo ? ` for your ${s.modelNo}` : ""}:`,
     });
-    recordSearch(s.userId, `image: ${result.description}`, s.modelNo);
-    const hits = searchParts({
+    await recordSearch(s.userId, `image: ${result.description}`, s.modelNo);
+    const hits = await searchParts({
       query: result.description,
       applianceType: s.applianceType,
       modelNo: s.modelNo,
       limit: 4,
     });
     if (hits.length > 0) {
-      emitPartCards(s, emit, hits);
+      await emitPartCards(s, emit, hits);
     } else {
       const partNos = await agentMatchParts(s, result.description, emit);
-      const parts = partNos.map((no) => getPartByNo(no)).filter((p): p is Part => !!p);
-      if (parts.length > 0) emitPartCards(s, emit, parts);
+      const parts = (await Promise.all(partNos.map((no) => getPartByNo(no)))).filter((p): p is Part => !!p);
+      if (parts.length > 0) await emitPartCards(s, emit, parts);
       else emit({ kind: "text", text: "I recognized the part but couldn't match it in our catalog. Could you tell me your appliance's model number?" });
     }
     return;
@@ -447,8 +446,8 @@ async function handleImage(
 }
 
 /** Post-identification home: personalized appliance cards + main menu */
-function emitHome(s: Session, emit: Emit): void {
-  const appliances = getAppliances(s.userId);
+async function emitHome(s: Session, emit: Emit): Promise<void> {
+  const appliances = await getAppliances(s.userId);
   if (appliances.length > 0) {
     emit({
       kind: "appliance_cards",
@@ -461,7 +460,7 @@ function emitHome(s: Session, emit: Emit): void {
   } else {
     // Customers who bought parts but never registered a machine:
     // infer likely models from part compatibility and offer them
-    const inferred = inferModelsFromPurchases(s.userId);
+    const inferred = await inferModelsFromPurchases(s.userId);
     if (inferred.length > 0) {
       emit({
         kind: "text",
@@ -481,9 +480,9 @@ function emitHome(s: Session, emit: Emit): void {
 }
 
 /** Lazy guest creation: an unidentified user who just starts talking becomes a guest */
-function ensureUser(s: Session, emit: Emit): void {
+async function ensureUser(s: Session, emit: Emit): Promise<void> {
   if (s.userId !== 0) return;
-  s.userId = createGuestUser();
+  s.userId = await createGuestUser();
   emit({
     kind: "text",
     text: "Continuing as a guest — everything works, I just won't have your purchase history. You can type your email anytime to load it.",
@@ -491,7 +490,7 @@ function ensureUser(s: Session, emit: Emit): void {
 }
 
 /** Email identification: load the account and its purchase history, or create one */
-function identifyUser(s: Session, emit: Emit, emailRaw: string): void {
+async function identifyUser(s: Session, emit: Emit, emailRaw: string): Promise<void> {
   const match = emailRaw.match(EMAIL_RE);
   if (!match) {
     emit({
@@ -502,7 +501,7 @@ function identifyUser(s: Session, emit: Emit, emailRaw: string): void {
     s.stage = "await_email";
     return;
   }
-  const user = getOrCreateUserByEmail(match[0]);
+  const user = await getOrCreateUserByEmail(match[0]);
   s.userId = user.id;
   if (user.isNew) {
     emit({
@@ -515,7 +514,7 @@ function identifyUser(s: Session, emit: Emit, emailRaw: string): void {
       text: `👋 Welcome back${user.name ? `, ${user.name}` : ""}! I've loaded your purchase history.`,
     });
   }
-  emitHome(s, emit);
+  await emitHome(s, emit);
 }
 
 /** State machine entry point */
@@ -528,18 +527,18 @@ export async function handleEvent(
   // users are lazily promoted to a guest account instead of being blocked
   if (s.userId === 0 && ev.type !== "init" && ev.type !== "submit_email") {
     if (ev.type === "continue_guest") {
-      ensureUser(s, emit);
-      emitHome(s, emit);
+      await ensureUser(s, emit);
+      await emitHome(s, emit);
       emit({ kind: "done" });
       return;
     }
     if (ev.type === "text" && s.stage === "await_email" && EMAIL_RE.test(ev.text)) {
-      identifyUser(s, emit, ev.text);
+      await identifyUser(s, emit, ev.text);
       emit({ kind: "done" });
       return;
     }
     // Any other action: become a guest and handle the event normally
-    ensureUser(s, emit);
+    await ensureUser(s, emit);
     if (s.stage === "await_email") s.stage = "menu";
   }
 
@@ -559,13 +558,13 @@ export async function handleEvent(
     }
 
     case "submit_email": {
-      identifyUser(s, emit, ev.email);
+      await identifyUser(s, emit, ev.email);
       break;
     }
 
     case "continue_guest": {
-      ensureUser(s, emit);
-      emitHome(s, emit);
+      await ensureUser(s, emit);
+      await emitHome(s, emit);
       break;
     }
 
@@ -575,13 +574,13 @@ export async function handleEvent(
     }
 
     case "select_appliance": {
-      const m = getModelByNo(ev.modelNo);
+      const m = await getModelByNo(ev.modelNo);
       if (m) {
         s.modelNo = m.model_no;
         s.applianceType = m.appliance_type;
         // Remember the confirmed machine so it shows as a card on the next visit
         // (upgraded to "owned" automatically when they purchase a part for it)
-        upsertAppliance(s.userId, m.model_no, "searched");
+        await upsertAppliance(s.userId, m.model_no, "searched");
         emit({
           kind: "text",
           text: `✓ Selected: ${m.brand} ${m.model_no}${m.name ? ` (${m.name})` : ""}. How can I help?`,
@@ -613,7 +612,7 @@ export async function handleEvent(
       } else {
         // install
         s.stage = "install_pick";
-        const purchased = getPurchasedParts(s.userId);
+        const purchased = await getPurchasedParts(s.userId);
         if (purchased.length > 0) {
           emit({
             kind: "text",
@@ -671,10 +670,10 @@ export async function handleEvent(
     }
 
     case "add_to_cart": {
-      const r = addToCart(s.userId, ev.partNo, ev.qty ?? 1);
+      const r = await addToCart(s.userId, ev.partNo, ev.qty ?? 1);
       if (r.ok) {
         emit({ kind: "text", text: "✅ Added to cart." });
-        emit({ kind: "cart", cart: cartView(s.userId) });
+        emit({ kind: "cart", cart: await cartView(s.userId) });
       } else if (r.reason === "out_of_stock") {
         emit({
           kind: "text",
@@ -689,13 +688,13 @@ export async function handleEvent(
     }
 
     case "remove_from_cart": {
-      removeFromCart(s.userId, ev.partNo);
-      emit({ kind: "cart", cart: cartView(s.userId) });
+      await removeFromCart(s.userId, ev.partNo);
+      emit({ kind: "cart", cart: await cartView(s.userId) });
       break;
     }
 
     case "checkout": {
-      startCheckout(s, emit);
+      await startCheckout(s, emit);
       break;
     }
 
@@ -704,7 +703,7 @@ export async function handleEvent(
       if (ev.value) {
         s.stage = "await_address";
         emit({ kind: "text", text: "Please enter your shipping address:" });
-        emit({ kind: "address_form", saved: getSavedAddress(s.userId) as never });
+        emit({ kind: "address_form", saved: (await getSavedAddress(s.userId)) as never });
       } else {
         emit({
           kind: "text",
@@ -719,7 +718,7 @@ export async function handleEvent(
       if (s.stage !== "await_address") break;
       s.pendingAddress = ev.address;
       s.stage = "await_payment";
-      const cart = cartView(s.userId);
+      const cart = await cartView(s.userId);
       emit({
         kind: "text",
         text: "Address saved. Last step — enter your card number (demo environment: any Visa number that passes validation works, e.g. 4242 4242 4242 4242):",
@@ -730,7 +729,7 @@ export async function handleEvent(
 
     case "submit_payment": {
       if (s.stage !== "await_payment" || !s.pendingAddress) break;
-      const cart = cartView(s.userId);
+      const cart = await cartView(s.userId);
       const pay = charge(ev.cardNo, cart.total);
       if (!pay.ok) {
         emit({
@@ -740,7 +739,7 @@ export async function handleEvent(
         emit({ kind: "payment_form", total: cart.total });
         break;
       }
-      const order = createOrder(s.userId, s.pendingAddress, pay.last4, s.modelNo);
+      const order = await createOrder(s.userId, s.pendingAddress, pay.last4, s.modelNo);
       if (!order.ok) {
         const msg =
           order.reason === "insufficient_stock"
@@ -768,8 +767,8 @@ export async function handleEvent(
 
     case "order_part": {
       if (ev.value) {
-        const part = getPartByNo(ev.partNo);
-        if (part) emitPartCards(s, emit, [part]);
+        const part = await getPartByNo(ev.partNo);
+        if (part) await emitPartCards(s, emit, [part]);
       } else {
         emit({
           kind: "text",
@@ -809,9 +808,9 @@ export async function handleEvent(
         }
         case "await_part_desc": {
           pushHistory(s, "user", text);
-          recordSearch(s.userId, text, s.modelNo);
+          await recordSearch(s.userId, text, s.modelNo);
           // Deterministic search first (zero tokens); the agent only runs if it finds nothing
-          const hits = searchParts({
+          const hits = await searchParts({
             query: text,
             applianceType: s.applianceType,
             modelNo: s.modelNo,
@@ -819,16 +818,16 @@ export async function handleEvent(
           });
           if (hits.length > 0) {
             emit({ kind: "text", text: "Here's what matches your description:" });
-            emitPartCards(s, emit, hits);
+            await emitPartCards(s, emit, hits);
             emit({
               kind: "text",
               text: "Tap “Add to Cart” to confirm, or keep describing other parts you need.",
             });
           } else {
             const partNos = await agentMatchParts(s, text, emit);
-            const parts = partNos.map((no) => getPartByNo(no)).filter((p): p is Part => !!p);
+            const parts = (await Promise.all(partNos.map((no) => getPartByNo(no)))).filter((p): p is Part => !!p);
             if (parts.length > 0) {
-              emitPartCards(s, emit, parts);
+              await emitPartCards(s, emit, parts);
             } else {
               emit({ kind: "text", text: APOLOGY });
               backToMenu(s, emit);

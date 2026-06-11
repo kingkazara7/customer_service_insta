@@ -26,8 +26,8 @@ For anything outside that scope (other appliances, coding, chit-chat, news, etc.
 Compatibility questions MUST be answered by calling the check_compatibility tool — never from memory. Before recommending parts you MUST call search_repair_guides or search_parts.
 Answer in English, concisely — at most 200 words of body text.`;
 
-function sessionContext(s: Session): string {
-  const parts: string[] = [profileSummary(s.userId)];
+async function sessionContext(s: Session): Promise<string> {
+  const parts: string[] = [await profileSummary(s.userId)];
   if (s.modelNo) parts.push(`Appliance model in this session: ${s.modelNo}`);
   if (s.lastPartNos.length > 0)
     parts.push(`Parts shown most recently: ${s.lastPartNos.join(", ")}`);
@@ -45,7 +45,7 @@ async function runLlm(s: Session, prompt: string, emit: Emit): Promise<string> {
   const result = query({
     prompt,
     options: {
-      systemPrompt: `${SCOPE_GUARD}\n\n## User & session context\n${sessionContext(s)}`,
+      systemPrompt: `${SCOPE_GUARD}\n\n## User & session context\n${await sessionContext(s)}`,
       mcpServers: { "partselect-catalog": catalogServer },
       allowedTools: [
         "mcp__partselect-catalog__search_parts",
@@ -116,7 +116,7 @@ Please: 1) call search_repair_guides to consult the repair knowledge base; 2) gi
       text: "I couldn't find an exact repair guide for that, but here are the parts that best match the symptom:",
     });
   }
-  const hits = searchParts({
+  const hits = await searchParts({
     query: faultText,
     applianceType: s.applianceType,
     modelNo: s.modelNo,
@@ -153,7 +153,7 @@ Call search_parts / get_parts_for_model to find matching parts, explain the matc
     }
   }
   // Degraded path: search again with looser constraints (drop the model filter)
-  const hits = searchParts({
+  const hits = await searchParts({
     query: descText,
     applianceType: s.applianceType,
     limit: 3,

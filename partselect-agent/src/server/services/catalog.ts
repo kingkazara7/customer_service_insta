@@ -1,4 +1,4 @@
-import { getDb } from "../db/connection";
+import { db } from "../db/connection";
 
 export type Part = {
   id: number;
@@ -37,58 +37,55 @@ export type InstallGuide = {
 const PART_COLS =
   "id, part_no, mfr_part_no, name, description, appliance_type, brand, price, stock_qty, image_url, product_url, symptoms";
 
-export function getPartByNo(partNo: string): Part | undefined {
-  return getDb()
-    .prepare(`SELECT ${PART_COLS} FROM parts WHERE part_no = ? COLLATE NOCASE`)
-    .get(partNo.trim()) as Part | undefined;
+export async function getPartByNo(partNo: string): Promise<Part | undefined> {
+  return db().get<Part>(
+    `SELECT ${PART_COLS} FROM parts WHERE LOWER(part_no) = LOWER(?)`,
+    [partNo.trim()]
+  );
 }
 
-export function getModelByNo(modelNo: string): ApplianceModel | undefined {
-  return getDb()
-    .prepare(
-      "SELECT id, model_no, brand, appliance_type, name FROM appliance_models WHERE model_no = ? COLLATE NOCASE"
-    )
-    .get(modelNo.trim()) as ApplianceModel | undefined;
+export async function getModelByNo(modelNo: string): Promise<ApplianceModel | undefined> {
+  return db().get<ApplianceModel>(
+    "SELECT id, model_no, brand, appliance_type, name FROM appliance_models WHERE LOWER(model_no) = LOWER(?)",
+    [modelNo.trim()]
+  );
 }
 
 /** M module: when a model isn't found, match close models by shrinking common prefix */
-export function findSimilarModels(modelNo: string, limit = 4): ApplianceModel[] {
-  const db = getDb();
+export async function findSimilarModels(modelNo: string, limit = 4): Promise<ApplianceModel[]> {
   const q = modelNo.trim().toUpperCase();
   for (let len = Math.min(q.length, 10); len >= 3; len--) {
-    const rows = db
-      .prepare(
-        `SELECT id, model_no, brand, appliance_type, name FROM appliance_models
-         WHERE UPPER(model_no) LIKE ? LIMIT ?`
-      )
-      .all(q.slice(0, len) + "%", limit) as ApplianceModel[];
+    const rows = await db().all<ApplianceModel>(
+      `SELECT id, model_no, brand, appliance_type, name FROM appliance_models
+       WHERE UPPER(model_no) LIKE ? LIMIT ?`,
+      [q.slice(0, len) + "%", limit]
+    );
     if (rows.length > 0) return rows;
   }
   // No prefix match at all → degrade to a contains match
-  return db
-    .prepare(
-      `SELECT id, model_no, brand, appliance_type, name FROM appliance_models
-       WHERE UPPER(model_no) LIKE ? LIMIT ?`
-    )
-    .all(`%${q.slice(0, 4)}%`, limit) as ApplianceModel[];
+  return db().all<ApplianceModel>(
+    `SELECT id, model_no, brand, appliance_type, name FROM appliance_models
+     WHERE UPPER(model_no) LIKE ? LIMIT ?`,
+    [`%${q.slice(0, 4)}%`, limit]
+  );
 }
 
 /** P module: close matches when a part number isn't found */
-export function findSimilarParts(partNo: string, limit = 4): Part[] {
-  const db = getDb();
+export async function findSimilarParts(partNo: string, limit = 4): Promise<Part[]> {
   const q = partNo.trim().toUpperCase();
   for (let len = Math.min(q.length, 9); len >= 4; len--) {
-    const rows = db
-      .prepare(`SELECT ${PART_COLS} FROM parts WHERE UPPER(part_no) LIKE ? LIMIT ?`)
-      .all(q.slice(0, len) + "%", limit) as Part[];
+    const rows = await db().all<Part>(
+      `SELECT ${PART_COLS} FROM parts WHERE UPPER(part_no) LIKE ? LIMIT ?`,
+      [q.slice(0, len) + "%", limit]
+    );
     if (rows.length > 0) return rows;
   }
   return [];
 }
 
-export function checkCompatibility(partNo: string, modelNo: string) {
-  const part = getPartByNo(partNo);
-  const model = getModelByNo(modelNo);
+export async function checkCompatibility(partNo: string, modelNo: string) {
+  const part = await getPartByNo(partNo);
+  const model = await getModelByNo(modelNo);
   if (!part || !model) {
     return {
       compatible: false as const,
@@ -96,15 +93,14 @@ export function checkCompatibility(partNo: string, modelNo: string) {
       modelFound: !!model,
       part: part ?? null,
       model: model ?? null,
-      similarModels: model ? [] : findSimilarModels(modelNo),
-      similarParts: part ? [] : findSimilarParts(partNo),
+      similarModels: model ? [] : await findSimilarModels(modelNo),
+      similarParts: part ? [] : await findSimilarParts(partNo),
     };
   }
-  const hit = getDb()
-    .prepare(
-      "SELECT 1 FROM compatibility WHERE part_id = ? AND model_id = ?"
-    )
-    .get(part.id, model.id);
+  const hit = await db().get(
+    "SELECT 1 AS x FROM compatibility WHERE part_id = ? AND model_id = ?",
+    [part.id, model.id]
+  );
   return {
     compatible: !!hit,
     partFound: true as const,
@@ -116,16 +112,15 @@ export function checkCompatibility(partNo: string, modelNo: string) {
   };
 }
 
-export function getCompatibleModels(partNo: string): ApplianceModel[] {
-  return getDb()
-    .prepare(
-      `SELECT m.id, m.model_no, m.brand, m.appliance_type, m.name
-       FROM compatibility c
-       JOIN parts p ON p.id = c.part_id
-       JOIN appliance_models m ON m.id = c.model_id
-       WHERE p.part_no = ? COLLATE NOCASE`
-    )
-    .all(partNo.trim()) as ApplianceModel[];
+export async function getCompatibleModels(partNo: string): Promise<ApplianceModel[]> {
+  return db().all<ApplianceModel>(
+    `SELECT m.id, m.model_no, m.brand, m.appliance_type, m.name
+     FROM compatibility c
+     JOIN parts p ON p.id = c.part_id
+     JOIN appliance_models m ON m.id = c.model_id
+     WHERE LOWER(p.part_no) = LOWER(?)`,
+    [partNo.trim()]
+  );
 }
 
 const STOPWORDS = new Set([
@@ -149,7 +144,6 @@ function extractTerms(query: string): string[] {
     .filter((t) => t.length >= 2);
   const terms: string[] = [];
   for (let i = 0; i < tokens.length - 1; i++) {
-    // keep a phrase when at least one word carries meaning
     if (!STOPWORDS.has(tokens[i]) || !STOPWORDS.has(tokens[i + 1])) {
       terms.push(`${tokens[i]} ${tokens[i + 1]}`);
     }
@@ -168,61 +162,65 @@ function extractTerms(query: string): string[] {
 /**
  * Keyword search over name/description/symptoms, optionally scoped to a model
  * (returns compatible parts only). Shared by the state machine and the agent;
- * symptom hits are weighted highest in the ranking.
+ * symptom hits are weighted highest in the ranking. Uses ILIKE-style matching
+ * portably via LOWER(col) LIKE LOWER(?).
  */
-export function searchParts(opts: {
+export async function searchParts(opts: {
   query: string;
   applianceType?: "refrigerator" | "dishwasher";
   modelNo?: string;
   limit?: number;
-}): Part[] {
-  const db = getDb();
+}): Promise<Part[]> {
   const limit = opts.limit ?? 6;
   const terms = extractTerms(opts.query);
+  const params: unknown[] = [];
 
-  const scoreExpr = terms
-    .map(
-      (_, i) =>
-        `(CASE WHEN symptoms LIKE @t${i} THEN 3 WHEN name LIKE @t${i} THEN 2 WHEN description LIKE @t${i} THEN 1 ELSE 0 END)`
-    )
-    .join(" + ");
-  const params: Record<string, string> = {};
-  terms.forEach((t, i) => (params[`t${i}`] = `%${t}%`));
+  // score expression repeats the term list; build it with positional params.
+  // Each term contributes the same three CASE checks, so push it 3× per use.
+  const scoreExpr = (push: boolean) =>
+    terms
+      .map((t) => {
+        if (push) params.push(`%${t}%`, `%${t}%`, `%${t}%`);
+        return `(CASE WHEN LOWER(symptoms) LIKE LOWER(?) THEN 3 WHEN LOWER(name) LIKE LOWER(?) THEN 2 WHEN LOWER(description) LIKE LOWER(?) THEN 1 ELSE 0 END)`;
+      })
+      .join(" + ");
 
-  let sql = `SELECT ${PART_COLS}, (${scoreExpr}) AS score FROM parts WHERE (${scoreExpr}) > 0`;
+  const selectScore = scoreExpr(true);   // params for SELECT
+  const whereScore = scoreExpr(true);    // params for WHERE
+  let sql = `SELECT ${PART_COLS}, (${selectScore}) AS score FROM parts WHERE (${whereScore}) > 0`;
   if (opts.applianceType) {
-    sql += ` AND appliance_type = @atype`;
-    params["atype"] = opts.applianceType;
+    sql += ` AND appliance_type = ?`;
+    params.push(opts.applianceType);
   }
   if (opts.modelNo) {
     sql += ` AND id IN (
       SELECT c.part_id FROM compatibility c
       JOIN appliance_models m ON m.id = c.model_id
-      WHERE m.model_no = @model COLLATE NOCASE)`;
-    params["model"] = opts.modelNo.trim();
+      WHERE LOWER(m.model_no) = LOWER(?))`;
+    params.push(opts.modelNo.trim());
   }
-  sql += ` ORDER BY score DESC, stock_qty DESC LIMIT ${limit}`;
-  return db.prepare(sql).all(params) as Part[];
+  sql += ` ORDER BY score DESC, stock_qty DESC LIMIT ?`;
+  params.push(limit);
+  return db().all<Part>(sql, params);
 }
 
 /** All compatible parts for a model (used by the pre-order "browse popular parts" path) */
-export function getPartsForModel(modelNo: string, limit = 10): Part[] {
-  return getDb()
-    .prepare(
-      `SELECT ${PART_COLS} FROM parts WHERE id IN (
-         SELECT c.part_id FROM compatibility c
-         JOIN appliance_models m ON m.id = c.model_id
-         WHERE m.model_no = ? COLLATE NOCASE)
-       ORDER BY stock_qty DESC LIMIT ?`
-    )
-    .all(modelNo.trim(), limit) as Part[];
+export async function getPartsForModel(modelNo: string, limit = 10): Promise<Part[]> {
+  return db().all<Part>(
+    `SELECT ${PART_COLS} FROM parts WHERE id IN (
+       SELECT c.part_id FROM compatibility c
+       JOIN appliance_models m ON m.id = c.model_id
+       WHERE LOWER(m.model_no) = LOWER(?))
+     ORDER BY stock_qty DESC LIMIT ?`,
+    [modelNo.trim(), limit]
+  );
 }
 
 /**
  * Upsert a live-fetched part + its compatibility link. Used by the live
- * fallback to grow the catalog at runtime. Returns the part_no on success.
+ * fallback to grow the catalog at runtime.
  */
-export function ingestLivePart(p: {
+export async function ingestLivePart(p: {
   part_no: string;
   mfr_part_no: string | null;
   name: string;
@@ -233,73 +231,69 @@ export function ingestLivePart(p: {
   stock: string | null;
   product_url?: string | null;
   modelNo?: string;
-}): void {
-  const db = getDb();
+}): Promise<void> {
   const qty =
     p.stock === "In Stock" ? 20
     : p.stock === "Special Order" || p.stock === "On Order" ? 3
     : 0;
   const url = p.product_url ?? `https://www.partselect.com/${p.part_no}.htm`;
-  const existing = db
-    .prepare("SELECT id FROM parts WHERE part_no = ? COLLATE NOCASE")
-    .get(p.part_no) as { id: number } | undefined;
+  const existing = await db().get<{ id: number }>(
+    "SELECT id FROM parts WHERE LOWER(part_no) = LOWER(?)",
+    [p.part_no]
+  );
   let partId: number;
   if (existing) {
-    db.prepare(
+    await db().exec(
       `UPDATE parts SET mfr_part_no = ?, name = ?, price = ?, stock_qty = ?,
          product_url = ?, appliance_type = ?, brand = ?,
          description = COALESCE(?, description)
-       WHERE id = ?`
-    ).run(
-      p.mfr_part_no, p.name, p.price, qty, url, p.appliance_type, p.brand,
-      p.description ?? null, existing.id
+       WHERE id = ?`,
+      [p.mfr_part_no, p.name, p.price, qty, url, p.appliance_type, p.brand,
+       p.description ?? null, existing.id]
     );
     partId = existing.id;
   } else {
-    partId = Number(
-      db.prepare(
-        `INSERT INTO parts (part_no, mfr_part_no, name, description, appliance_type, brand, price, stock_qty, product_url)
-         VALUES (?,?,?,?,?,?,?,?,?)`
-      ).run(
-        p.part_no, p.mfr_part_no, p.name,
-        p.description ?? `Genuine ${p.brand ?? ""} ${p.name}.`.trim(),
-        p.appliance_type, p.brand, p.price, qty, url
-      ).lastInsertRowid
+    const row = await db().get<{ id: number }>(
+      `INSERT INTO parts (part_no, mfr_part_no, name, description, appliance_type, brand, price, stock_qty, product_url)
+       VALUES (?,?,?,?,?,?,?,?,?) RETURNING id`,
+      [p.part_no, p.mfr_part_no, p.name,
+       p.description ?? `Genuine ${p.brand ?? ""} ${p.name}.`.trim(),
+       p.appliance_type, p.brand, p.price, qty, url]
     );
+    partId = row!.id;
   }
   if (p.modelNo) {
-    const model = db
-      .prepare("SELECT id FROM appliance_models WHERE model_no = ? COLLATE NOCASE")
-      .get(p.modelNo) as { id: number } | undefined;
+    const model = await db().get<{ id: number }>(
+      "SELECT id FROM appliance_models WHERE LOWER(model_no) = LOWER(?)",
+      [p.modelNo]
+    );
     if (model) {
-      db.prepare("INSERT OR IGNORE INTO compatibility (part_id, model_id) VALUES (?,?)")
-        .run(partId, model.id);
+      await db().exec(
+        "INSERT INTO compatibility (part_id, model_id) VALUES (?,?) ON CONFLICT DO NOTHING",
+        [partId, model.id]
+      );
     }
   }
 }
 
 /** Create a model row if it doesn't exist (live fallback for unknown models). */
-export function ensureModel(
+export async function ensureModel(
   modelNo: string, brand: string, applianceType: "refrigerator" | "dishwasher"
-): void {
-  getDb()
-    .prepare(
-      `INSERT OR IGNORE INTO appliance_models (model_no, brand, appliance_type) VALUES (?,?,?)`
-    )
-    .run(modelNo.trim().toUpperCase(), brand, applianceType);
+): Promise<void> {
+  await db().exec(
+    `INSERT INTO appliance_models (model_no, brand, appliance_type) VALUES (?,?,?) ON CONFLICT DO NOTHING`,
+    [modelNo.trim().toUpperCase(), brand, applianceType]
+  );
 }
 
-export function getInstallGuide(partNo: string): InstallGuide | undefined {
-  const row = getDb()
-    .prepare(
-      `SELECT p.part_no, p.name AS part_name, g.difficulty, g.est_time_minutes,
-              g.tools, g.steps_json, g.video_url, g.manual_url
-       FROM install_guides g JOIN parts p ON p.id = g.part_id
-       WHERE p.part_no = ? COLLATE NOCASE`
-    )
-    .get(partNo.trim()) as
-    | (Omit<InstallGuide, "steps"> & { steps_json: string })
-    | undefined;
+export async function getInstallGuide(partNo: string): Promise<InstallGuide | undefined> {
+  const row = await db().get<Omit<InstallGuide, "steps"> & { steps_json: string }>(
+    `SELECT p.part_no, p.name AS part_name, g.difficulty, g.est_time_minutes,
+            g.tools, g.steps_json, g.video_url, g.manual_url
+     FROM install_guides g JOIN parts p ON p.id = g.part_id
+     WHERE LOWER(p.part_no) = LOWER(?)`,
+    [partNo.trim()]
+  );
   if (!row) return undefined;
   const { steps_json, ...rest } = row;
   return { ...rest, steps: JSON.parse(steps_json) as string[] };
@@ -320,39 +314,42 @@ export type DocChunk = {
  * Keyword RAG retrieval (symptom_tags hits weighted highest). The vector path
  * in rag.ts supersedes this when embeddings are present; same interface.
  */
-export function searchDocChunks(opts: {
+export async function searchDocChunks(opts: {
   query: string;
   applianceType?: "refrigerator" | "dishwasher";
   partNo?: string;
   limit?: number;
   /** Noise threshold: genuine symptom matches usually score ≥6, random text ≤2 */
   minScore?: number;
-}): DocChunk[] {
-  const db = getDb();
+}): Promise<DocChunk[]> {
   const limit = opts.limit ?? 3;
   const minScore = opts.minScore ?? 3;
   const terms = extractTerms(opts.query);
+  const params: unknown[] = [];
 
-  const scoreExpr = terms
-    .map(
-      (_, i) =>
-        `(CASE WHEN symptom_tags LIKE @t${i} THEN 3 WHEN chunk_text LIKE @t${i} THEN 1 ELSE 0 END)`
-    )
-    .join(" + ");
-  const params: Record<string, string> = {};
-  terms.forEach((t, i) => (params[`t${i}`] = `%${t}%`));
+  const scoreExpr = () =>
+    terms
+      .map((t) => {
+        params.push(`%${t}%`, `%${t}%`);
+        return `(CASE WHEN LOWER(symptom_tags) LIKE LOWER(?) THEN 3 WHEN LOWER(chunk_text) LIKE LOWER(?) THEN 1 ELSE 0 END)`;
+      })
+      .join(" + ");
 
+  const selectScore = scoreExpr();
+  const whereScore = scoreExpr();
   let sql = `SELECT id, source_type, part_id, appliance_type, symptom_tags, chunk_text, source_url, source_ref,
-                    (${scoreExpr}) AS score
-             FROM doc_chunks WHERE (${scoreExpr}) >= ${minScore}`;
+                    (${selectScore}) AS score
+             FROM doc_chunks WHERE (${whereScore}) >= ?`;
+  params.push(minScore);
   if (opts.applianceType) {
-    sql += ` AND appliance_type = @atype`;
-    params["atype"] = opts.applianceType;
+    sql += ` AND appliance_type = ?`;
+    params.push(opts.applianceType);
   }
   if (opts.partNo) {
-    sql += ` AND part_id = (SELECT id FROM parts WHERE part_no = @pno COLLATE NOCASE)`;
-    params["pno"] = opts.partNo.trim();
+    sql += ` AND part_id = (SELECT id FROM parts WHERE LOWER(part_no) = LOWER(?))`;
+    params.push(opts.partNo.trim());
   }
-  sql += ` ORDER BY score DESC LIMIT ${limit}`;
-  return db.prepare(sql).all(params) as DocChunk[];
+  sql += ` ORDER BY score DESC LIMIT ?`;
+  params.push(limit);
+  return db().all<DocChunk>(sql, params);
 }

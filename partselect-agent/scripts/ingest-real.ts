@@ -17,7 +17,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { getDb } from "../src/server/db/connection";
+import { db } from "../src/server/db/connection";
 
 type ListingPart = {
   ps: string; mfr: string | null; name: string; price: number | string; stock: string | null; slug: string;
@@ -59,7 +59,7 @@ function stockQty(stock: string | null, existing: number | undefined): number {
  */
 const STALE_FAKES = ["PS11753783", "PS11770327"];
 
-function main() {
+async function main() {
   const dir = path.join(process.cwd(), "data", "ingested");
   const harvest = JSON.parse(
     fs.readFileSync(path.join(dir, "real-parts.json"), "utf8")
@@ -72,28 +72,33 @@ function main() {
     harvest.models = full.models;
     console.log(`using full harvest: ${full.models.map((m) => `${m.modelNo}(${m.parts.length})`).join(", ")}`);
   }
-  const db = getDb();
 
-  const run = db.transaction(() => {
+  const DEFAULT_STEPS = JSON.stringify([
+    "Disconnect power to the appliance (and water supply where applicable)",
+    "Remove the old part — the linked video shows the exact procedure",
+    "Install the new part, reconnect power, and verify operation",
+  ]);
+
+  await db().tx(async (t) => {
     // Remove invented seed parts whose mfr numbers collide with different real
     // parts (skip any that an order references)
     for (const fakeNo of STALE_FAKES) {
-      const row = db.prepare("SELECT id FROM parts WHERE part_no = ?").get(fakeNo) as { id: number } | undefined;
+      const row = await t.get<{ id: number }>("SELECT id FROM parts WHERE part_no = ?", [fakeNo]);
       if (!row) continue;
-      const used = db.prepare("SELECT 1 FROM order_items WHERE part_id = ? LIMIT 1").get(row.id);
+      const used = await t.get("SELECT 1 AS x FROM order_items WHERE part_id = ? LIMIT 1", [row.id]);
       if (used) continue;
-      db.prepare("DELETE FROM compatibility WHERE part_id = ?").run(row.id);
-      db.prepare("DELETE FROM install_guides WHERE part_id = ?").run(row.id);
-      db.prepare("DELETE FROM carts WHERE part_id = ?").run(row.id);
-      db.prepare("DELETE FROM parts WHERE id = ?").run(row.id);
+      await t.exec("DELETE FROM compatibility WHERE part_id = ?", [row.id]);
+      await t.exec("DELETE FROM install_guides WHERE part_id = ?", [row.id]);
+      await t.exec("DELETE FROM carts WHERE part_id = ?", [row.id]);
+      await t.exec("DELETE FROM parts WHERE id = ?", [row.id]);
       console.log(`removed stale fake ${fakeNo}`);
     }
     // 1. Remap invented part numbers to their real PartSelect numbers in place
     for (const [fake, real] of Object.entries(harvest.remap)) {
-      const fakeRow = db.prepare("SELECT id FROM parts WHERE part_no = ?").get(fake);
-      const realRow = db.prepare("SELECT id FROM parts WHERE part_no = ?").get(real);
+      const fakeRow = await t.get("SELECT id FROM parts WHERE part_no = ?", [fake]);
+      const realRow = await t.get("SELECT id FROM parts WHERE part_no = ?", [real]);
       if (fakeRow && !realRow) {
-        db.prepare("UPDATE parts SET part_no = ? WHERE part_no = ?").run(real, fake);
+        await t.exec("UPDATE parts SET part_no = ? WHERE part_no = ?", [real, fake]);
         console.log(`remapped ${fake} -> ${real}`);
       }
     }
@@ -101,9 +106,9 @@ function main() {
     let upserted = 0, links = 0, guides = 0;
     const processed = new Set<string>();
     for (const model of harvest.models) {
-      const modelRow = db
-        .prepare("SELECT id FROM appliance_models WHERE model_no = ?")
-        .get(model.modelNo) as { id: number } | undefined;
+      const modelRow = await t.get<{ id: number }>(
+        "SELECT id FROM appliance_models WHERE model_no = ?", [model.modelNo]
+      );
       if (!modelRow) {
         console.warn(`model ${model.modelNo} not in DB, skipping`);
         continue;
@@ -112,9 +117,9 @@ function main() {
       for (const p of model.parts) {
         processed.add(p.ps);
         const detail = harvest.details[p.ps];
-        const existing = db
-          .prepare("SELECT id, stock_qty FROM parts WHERE part_no = ?")
-          .get(p.ps) as { id: number; stock_qty: number } | undefined;
+        const existing = await t.get<{ id: number; stock_qty: number }>(
+          "SELECT id, stock_qty FROM parts WHERE part_no = ?", [p.ps]
+        );
         const url = `https://www.partselect.com/${p.ps}-${detail?.slug ?? p.slug}.htm`;
         const price = detail?.price ?? Number(p.price);
         if (!Number.isFinite(price) || price <= 0) continue;
@@ -122,106 +127,84 @@ function main() {
 
         let partId: number;
         if (existing) {
-          db.prepare(
+          await t.exec(
             `UPDATE parts SET mfr_part_no = ?, name = ?, price = ?, stock_qty = ?,
                product_url = ?, appliance_type = ?, brand = ?,
                description = COALESCE(?, description),
                symptoms = COALESCE(?, symptoms)
-             WHERE id = ?`
-          ).run(
-            p.mfr, p.name, price, qty, url, model.type, model.brand,
-            detail?.description ?? null, detail?.symptoms ?? null, existing.id
+             WHERE id = ?`,
+            [p.mfr, p.name, price, qty, url, model.type, model.brand,
+             detail?.description ?? null, detail?.symptoms ?? null, existing.id]
           );
           partId = existing.id;
         } else {
-          partId = Number(
-            db.prepare(
-              `INSERT INTO parts (part_no, mfr_part_no, name, description, appliance_type,
-                 brand, price, stock_qty, product_url, symptoms)
-               VALUES (?,?,?,?,?,?,?,?,?,?)`
-            ).run(
-              p.ps, p.mfr, p.name,
-              detail?.description ?? `Genuine ${model.brand} ${p.name} (${p.mfr}).`,
-              model.type, model.brand, price, qty, url,
-              detail?.symptoms ?? null
-            ).lastInsertRowid
+          const ins = await t.get<{ id: number }>(
+            `INSERT INTO parts (part_no, mfr_part_no, name, description, appliance_type,
+               brand, price, stock_qty, product_url, symptoms)
+             VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id`,
+            [p.ps, p.mfr, p.name,
+             detail?.description ?? `Genuine ${model.brand} ${p.name} (${p.mfr}).`,
+             model.type, model.brand, price, qty, url, detail?.symptoms ?? null]
           );
+          partId = ins!.id;
         }
         upserted++;
 
-        db.prepare(
-          "INSERT OR IGNORE INTO compatibility (part_id, model_id) VALUES (?,?)"
-        ).run(partId, modelRow.id);
+        await t.exec(
+          "INSERT INTO compatibility (part_id, model_id) VALUES (?,?) ON CONFLICT DO NOTHING",
+          [partId, modelRow.id]
+        );
         links++;
 
         if (detail) {
-          const existingGuide = db
-            .prepare("SELECT steps_json FROM install_guides WHERE part_id = ?")
-            .get(partId) as { steps_json: string } | undefined;
-          const steps = existingGuide
-            ? existingGuide.steps_json
-            : JSON.stringify([
-                "Disconnect power to the appliance (and water supply where applicable)",
-                `Remove the old part — the linked video shows the exact procedure for the ${p.name}`,
-                "Install the new part, reconnect power, and verify operation",
-              ]);
-          db.prepare(
+          const existingGuide = await t.get<{ steps_json: string }>(
+            "SELECT steps_json FROM install_guides WHERE part_id = ?", [partId]
+          );
+          const steps = existingGuide?.steps_json ?? DEFAULT_STEPS;
+          await t.exec(
             `INSERT INTO install_guides (part_id, difficulty, est_time_minutes, tools, steps_json, video_url, manual_url)
              VALUES (?,?,?,?,?,?,?)
-             ON CONFLICT(part_id) DO UPDATE SET
+             ON CONFLICT (part_id) DO UPDATE SET
                difficulty = excluded.difficulty,
                est_time_minutes = excluded.est_time_minutes,
                video_url = excluded.video_url,
-               manual_url = excluded.manual_url`
-          ).run(
-            partId, DIFFICULTY[detail.difficulty] ?? "medium", minutes(detail.installTime),
-            "See video for required tools", steps, detail.videoUrl, url
+               manual_url = excluded.manual_url`,
+            [partId, DIFFICULTY[detail.difficulty] ?? "medium", minutes(detail.installTime),
+             "See video for required tools", steps, detail.videoUrl, url]
           );
           guides++;
         }
       }
     }
-    // Detail entries not present in any model listing (e.g. a part page that was
-    // harvested directly): update the existing part's fields and guide, but do
-    // not invent compatibility links we didn't observe.
+    // Detail entries not present in any model listing (a directly-harvested page):
+    // update the existing part's fields and guide; no invented compatibility links.
     for (const [ps, detail] of Object.entries(harvest.details)) {
       if (processed.has(ps)) continue;
-      const existing = db
-        .prepare("SELECT id FROM parts WHERE part_no = ?")
-        .get(ps) as { id: number } | undefined;
+      const existing = await t.get<{ id: number }>("SELECT id FROM parts WHERE part_no = ?", [ps]);
       if (!existing) continue;
-      db.prepare(
+      await t.exec(
         `UPDATE parts SET
            price = COALESCE(?, price),
            description = COALESCE(?, description),
            symptoms = COALESCE(?, symptoms),
            product_url = COALESCE(?, product_url)
-         WHERE id = ?`
-      ).run(
-        detail.price ?? null, detail.description ?? null, detail.symptoms ?? null,
-        detail.slug ? `https://www.partselect.com/${ps}-${detail.slug}.htm` : null,
-        existing.id
+         WHERE id = ?`,
+        [detail.price ?? null, detail.description ?? null, detail.symptoms ?? null,
+         detail.slug ? `https://www.partselect.com/${ps}-${detail.slug}.htm` : null, existing.id]
       );
-      const existingGuide = db
-        .prepare("SELECT steps_json FROM install_guides WHERE part_id = ?")
-        .get(existing.id) as { steps_json: string } | undefined;
-      db.prepare(
+      const existingGuide = await t.get<{ steps_json: string }>(
+        "SELECT steps_json FROM install_guides WHERE part_id = ?", [existing.id]
+      );
+      await t.exec(
         `INSERT INTO install_guides (part_id, difficulty, est_time_minutes, tools, steps_json, video_url, manual_url)
          VALUES (?,?,?,?,?,?,?)
-         ON CONFLICT(part_id) DO UPDATE SET
+         ON CONFLICT (part_id) DO UPDATE SET
            difficulty = excluded.difficulty,
            est_time_minutes = excluded.est_time_minutes,
-           video_url = excluded.video_url`
-      ).run(
-        existing.id, DIFFICULTY[detail.difficulty] ?? "medium", minutes(detail.installTime),
-        "See video for required tools",
-        existingGuide?.steps_json ?? JSON.stringify([
-          "Disconnect power to the appliance",
-          "Remove the old part — the linked video shows the exact procedure",
-          "Install the new part and verify operation",
-        ]),
-        detail.videoUrl,
-        detail.slug ? `https://www.partselect.com/${ps}-${detail.slug}.htm` : null
+           video_url = excluded.video_url`,
+        [existing.id, DIFFICULTY[detail.difficulty] ?? "medium", minutes(detail.installTime),
+         "See video for required tools", existingGuide?.steps_json ?? DEFAULT_STEPS, detail.videoUrl,
+         detail.slug ? `https://www.partselect.com/${ps}-${detail.slug}.htm` : null]
       );
       upserted++; guides++;
       console.log(`detail-only update: ${ps}`);
@@ -229,7 +212,7 @@ function main() {
 
     console.log(`Ingest complete: ${upserted} parts upserted, ${links} compatibility links, ${guides} install guides enriched.`);
   });
-  run();
+  process.exit(0);
 }
 
-main();
+main().catch((e) => { console.error(e); process.exit(1); });
