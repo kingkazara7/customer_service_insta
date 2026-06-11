@@ -13,4 +13,9 @@ out/
 # local databases
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 *.sqlite
+
+# deploy artifacts
+deploy.tar.gz

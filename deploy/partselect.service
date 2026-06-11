@@ -1,0 +1,14 @@
+[Unit]
+Description=PartSelect Agent (Next.js)
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/app/partselect-agent
+EnvironmentFile=/etc/partselect.env
+ExecStart=/usr/bin/npm start
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
