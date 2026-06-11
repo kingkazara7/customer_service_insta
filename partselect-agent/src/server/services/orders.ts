@@ -15,9 +15,10 @@ export type CartItem = {
 export type Cart = { items: CartItem[]; total: number; count: number };
 
 async function cartItems(conn: Db, userId: number): Promise<CartItem[]> {
+  // line_total is rounded in JS (summarize) — Postgres has no round(double, int)
   return conn.all<CartItem>(
     `SELECT c.part_id, p.part_no, p.name, p.price, c.qty, p.stock_qty,
-            ROUND(p.price * c.qty, 2) AS line_total
+            (p.price * c.qty) AS line_total
      FROM carts c JOIN parts p ON p.id = c.part_id
      WHERE c.user_id = ?`,
     [userId]
@@ -25,11 +26,11 @@ async function cartItems(conn: Db, userId: number): Promise<CartItem[]> {
 }
 
 function summarize(items: CartItem[]): Cart {
-  // pg returns NUMERIC as strings; coerce to numbers
+  // coerce to numbers (pg may return strings) and round money in JS
   const norm = items.map((i) => ({
     ...i,
     price: Number(i.price),
-    line_total: Number(i.line_total),
+    line_total: Math.round(Number(i.line_total) * 100) / 100,
   }));
   const total = Math.round(norm.reduce((s, i) => s + i.line_total, 0) * 100) / 100;
   return { items: norm, total, count: norm.reduce((s, i) => s + i.qty, 0) };
