@@ -1,0 +1,16 @@
+# secrets — never commit
+instalily-key.pem
+.deploy-secrets
+*.pem
+.env
+.env.*
+
+# deps / build
+node_modules/
+.next/
+out/
+
+# local databases
+*.db
+*.db-journal
+*.sqlite
