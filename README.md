@@ -14,13 +14,15 @@ A production-deployed chat agent for the PartSelect e-commerce scenario, scoped 
 | **Chat UI** | Next.js 16 + React 19, PartSelect branding (teal/gold), SSE streaming, rich message types: appliance cards, part cards (price / stock / compatibility badges), install-guide cards, cart drawer, address & payment forms, order confirmation |
 | **Identity** | Email-or-guest at session start. Email loads purchase history; guests are lazily created and never blocked; typing a bare email mid-session switches accounts |
 | **Personalization** | Owned appliances render as one-click cards; customers who only ever bought parts get appliance suggestions **inferred from part compatibility** ("Likely yours"); addresses pre-fill from the last order |
+| **Vision** | 📷 upload a photo of the **model/serial nameplate** (Claude reads the model number) or a **broken part** (Claude identifies it) → routes straight into the model-lookup / part-search flow; rejects non-appliance photos |
+| **Live fallback** | When a model or part isn't in the local catalog, fetch it from partselect.com, parse it, and **ingest it into the catalog** (self-growing KB); proxy-ready, graceful degradation |
 | **Diagnosis** | Self-help troubleshooting first (RAG with source links), then replacement-part recommendations as confirmable cards |
 | **Commerce** | Stock-aware part cards ("Only N left" / "Out of stock"), confirm-to-add cart, order summary, demo Visa payment (Luhn-validated, **no real charges**), transactional stock decrement (oversell-proof) |
 | **Self-maintenance** | Cleaning/maintenance knowledge (clogged dishwasher filter rinse, cleaner-tablet cycles, descaling, condenser-coil cleaning) with cleaning supplies sold as parts |
 | **Agent** | Claude (Sonnet 4.5) on Amazon Bedrock via the Claude Agent SDK, with 9 read-only MCP tools and a fully functional no-LLM degraded mode |
 | **Retrieval** | Two-tier: exact SQL for structured facts, vector RAG (Titan Embeddings v2, pgvector-ready) with automatic keyword fallback |
 | **Infra** | EC2 (nginx + systemd + Let's Encrypt TLS on a custom domain), RDS PostgreSQL provisioned for migration, Bedrock for LLM + embeddings |
-| **Testing** | 41 end-to-end assertions covering every flow branch, the three case-study example queries, stock edge cases, guardrails, and identity paths |
+| **Testing** | 43 end-to-end assertions covering every flow branch, the three case-study example queries, stock edge cases, guardrails, identity, and vision paths |
 
 ---
 
@@ -84,6 +86,16 @@ Every LLM node has a deterministic fallback (keyword RAG + templated copy + symp
 1. **Prompt scope-pin:** the system prompt restricts the assistant to refrigerator/dishwasher parts and mandates tool use for compatibility and diagnosis claims.
 2. **Read-only tools:** the LLM physically cannot mutate state — cart adds, orders, and charges exist only behind user-confirmed UI events.
 3. **Deterministic facts:** compatibility answers always come from the SQL compatibility matrix; the model narrates tool results, never invents them. Out-of-scope requests (tested live: "write me a poem") get a polite refusal in both LLM and degraded modes.
+
+### 3.5 Vision input ([vision.ts](partselect-agent/src/server/vision.ts))
+
+Model/serial nameplate strings (`WDT780SAEM1`) are painful to type and customers rarely know a part's name — so the most natural input in this domain is a photo. The 📷 button sends a (client-downscaled) image; the agent calls **Bedrock Converse with an image block** and the model returns one structured line — `MODEL: …`, `PART: … | refrigerator/dishwasher`, or `UNCLEAR: …` — which routes straight into the existing M-module (model lookup) or part search. Verified live: a Whirlpool nameplate photo resolves to `WRS325SDHZ01` and continues the flow; a non-appliance image is refused (the scope guardrail extends to vision). Degrades gracefully to "please type your model number" when no LLM is configured.
+
+### 3.6 Live fallback & self-growing catalog ([liveFetch.ts](partselect-agent/src/server/liveFetch.ts))
+
+When a model or part number misses the local catalog, the agent says *"Let me check PartSelect directly…"* and fetches the live page via a real browser engine (Playwright), parses it with the **same extraction logic that harvested the 620-part catalog**, ingests it (`ingestLivePart` / `ensureModel`), and answers from the now-present row — a knowledge base that grows with use.
+
+**The honest operational caveat, documented because it matters:** partselect.com sits behind edge bot-protection that returns **HTTP 403 to datacenter IPs** — verified that even a real headless Chromium from our EC2 host gets "Access Denied". This is the *same wall* that breaks the competitors' HTTP scrapers. A reliable live fetch therefore needs a residential egress: set `SCRAPE_PROXY_URL` to a residential proxy and the real-browser engine passes. The feature is off by default (`LIVE_FETCH=1` to enable) and degrades cleanly to the catalog answer when the fetch is blocked — so on the EC2 demo the mechanism is present and proxy-ready, while the *owned* catalog is what makes the system robust regardless.
 
 ---
 
@@ -244,9 +256,13 @@ Known next steps: SQLite→RDS migration (async pg refactor of the service layer
 
 ---
 
-## 11. Comparison with a public reference implementation
+## 11. Comparison with public reference implementations
 
-A well-known public attempt at this case study is [gmunhoz0810/PartSelect-LLM-Assistant](https://github.com/gmunhoz0810/PartSelect-LLM-Assistant) (GPT-4o + FastAPI, documented in the author's slide deck). Facts below come from its source code (`backend/app.py`) and the author's own slides.
+We studied two public attempts and benchmarked against the stronger of the two. Facts below come from their source code and (where available) the authors' own slides.
+
+### 11a. vs [gmunhoz0810/PartSelect-LLM-Assistant](https://github.com/gmunhoz0810/PartSelect-LLM-Assistant)
+
+GPT-4o + FastAPI, documented in the author's slide deck.
 
 **Its design in one line:** a pure agent — every query goes through GPT-4o with 4 OpenAI function-calling tools that **scrape partselect.com in real time** (BeautifulSoup over CSS selectors); SQLite is used only to log conversation history; the frontend is a non-streaming chat on GitHub Pages.
 
@@ -268,3 +284,16 @@ A well-known public attempt at this case study is [gmunhoz0810/PartSelect-LLM-As
 **Where the reference implementation is genuinely stronger — and our answer.** Real-time scraping gives it the *entire* live PartSelect catalog (~2M parts, fresh prices) with zero storage. That is a real advantage for breadth, and we say so plainly. But it is also a ceiling: a scraper can read pages, yet it can never hold stock authority, write an order, or guarantee compatibility after a markup change — which is why that design *cannot* satisfy the transactional half of the brief, and why its author lists HTML-dependence as his first negative.
 
 That brittleness is no longer hypothetical: **as of 2026-06-11, partselect.com returns HTTP 403 to plain HTTP clients** (verified with curl and two independent server-side fetchers). The reference implementation's per-request scraping would not function against today's site, while this system keeps answering from its owned catalog. We closed the breadth gap from the other direction: the **ingestion contract is implemented** ([scripts/ingest-real.ts](partselect-agent/scripts/ingest-real.ts)) — the complete catalogs of 5 real models (~620 unique parts with real PartSelect numbers, prices, and stock states, plus real symptom lists, difficulty ratings, and installation videos for the hero parts) were harvested through a real browser session, which passes the bot protection that blocks HTTP scrapers, and merged into the transactional schema. Breadth *and* freshness on top of a commerce agent — not instead of one.
+
+### 11b. vs [annielouu/ecommerce_chat_agent](https://github.com/annielouu/ecommerce_chat_agent)
+
+The stronger of the two — also on the **Claude Agent SDK** (claude-haiku-4-5, beta `tool_runner`), with ChromaDB RAG, a self-growing knowledge base (`fetch_page` caches fetched pages), Playwright-stealth scraping across 5 brand domains via Serper web search, a scope guardrail, **and a vision variant** (`AppWithVision.js`). It is a genuinely good *research/retrieval* agent. What it explicitly does not do (per its README): cart, checkout, user accounts, streaming.
+
+When we first compared, it had two features we lacked — **vision** and **live web-search fallback**. We closed both:
+
+| Feature it had that we didn't | Status now |
+|---|---|
+| Vision (photo input) | ✅ Implemented (§3.5) — model-sticker reading + part identification via Bedrock Converse, verified live; with the scope guardrail extended to images |
+| Live fetch + self-growing KB | ✅ Implemented (§3.6) — catalog-miss → live partselect fetch → ingest → answer; proxy-ready, graceful degradation |
+
+So the retrieval-side gap is closed, while the **commerce, identity, inventory-authority, streaming, deployment, and automated-testing** advantages remain ours. Two notes in fairness: its Serper integration searches *multiple brand domains* (whirlpool.com, samsung.com, …) where ours is partselect-scoped; and its self-growing KB uses a dedicated ChromaDB store where ours grows the relational catalog (a deliberate choice — our growth is transactionally usable, not just retrievable). Net: the two projects are different species — a retrieval agent and a commerce agent — and for a brief whose stated primary functions are "provide product information **and assist with customer transactions**," ours covers both halves while matching its retrieval headline features.

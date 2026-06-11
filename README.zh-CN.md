@@ -16,13 +16,15 @@
 | **聊天 UI** | Next.js 16 + React 19,PartSelect 品牌配色(青绿/金黄),SSE 流式输出;富消息类型:家电卡片、零件卡片(价格/库存/兼容标签)、安装指南卡片、购物车抽屉、地址与支付表单、订单确认卡片 |
 | **身份系统** | 开场可选"邮箱 / 游客":邮箱载入购买历史;游客懒建档、绝不拦截任何操作;会话中输入裸邮箱可随时切换账号 |
 | **个性化** | 已购家电渲染成一键卡片;只买过零件的用户由**零件兼容性反推可能机型**("Likely yours");地址自动预填上次订单 |
+| **视觉识别** | 📷 上传**铭牌照片**(Claude 读出型号)或**坏零件照片**(Claude 识别零件)→ 直接进入型号查询/零件搜索流程;非家电照片被拒绝 |
+| **实时兜底** | 库里查不到型号/零件时,实时抓取 partselect.com 页面、解析、**写入目录**(自增长知识库);proxy-ready,优雅降级 |
 | **故障诊断** | 先给带来源链接的自助排查步骤(RAG),再给可确认的替换零件卡片 |
 | **电商闭环** | 库存感知卡片("仅剩 N 件"/"缺货")、确认制加购、订单摘要、演示版 Visa 支付(Luhn 校验,**无真实扣款**)、事务化扣库存(防超卖) |
 | **自助保养** | 清洁/保养知识库(洗碗机滤网清洗、清洁片循环、除垢、冷凝器清洁),清洁用品本身作为可购买商品 |
 | **Agent** | Claude(Sonnet 4.5)on Amazon Bedrock,经 Claude Agent SDK 驱动,配 9 个只读 MCP 工具,且具备完整可用的无 LLM 降级模式 |
 | **检索** | 双层:结构化事实走精确 SQL,模糊知识走向量 RAG(Titan Embeddings v2,pgvector-ready),关键词检索自动兜底 |
 | **基础设施** | EC2(nginx + systemd + Let's Encrypt TLS + 自有域名),RDS PostgreSQL 已就绪待迁移,Bedrock 提供 LLM 与向量 |
-| **测试** | 41 项端到端断言:全部流程分支、案例三道例题、库存边界、防护栏、身份路径 |
+| **测试** | 43 项端到端断言:全部流程分支、案例三道例题、库存边界、防护栏、身份与视觉路径 |
 
 ---
 
@@ -84,6 +86,16 @@ Agent 跑在 **Claude Agent SDK**(`query()`)上,它提供 Agent 循环、MCP 工
 1. **提示词锁定范围:** 系统提示词将助手限定在冰箱/洗碗机配件,且强制兼容性与诊断结论必须来自工具调用
 2. **工具只读:** LLM 物理上无法改写状态——加购、下单、扣款只存在于用户点击确认的 UI 事件背后
 3. **事实确定性:** 兼容性答案永远来自 SQL 兼容性矩阵;模型只转述工具结果,绝不编造。超范围请求(线上实测:"给我写首诗")在 LLM 模式和降级模式下都会得到礼貌拒绝
+
+### 3.5 视觉输入([vision.ts](partselect-agent/src/server/vision.ts))
+
+铭牌/序列号字符串(`WDT780SAEM1`)极难手打,而顾客往往不知道零件的名字——所以这个领域最自然的输入就是照片。📷 按钮发送(前端已缩放的)图片,Agent 调用 **Bedrock Converse 的图像块**,模型返回一行结构化结果——`MODEL: …`、`PART: … | 冰箱/洗碗机` 或 `UNCLEAR: …`——直接路由进既有的 M 模块(型号查询)或零件搜索。线上实测:惠而浦铭牌照片解析为 `WRS325SDHZ01` 并继续流程;非家电图片被拒绝(范围防护栏延伸到了视觉)。无 LLM 时优雅降级为"请手动输入型号"。
+
+### 3.6 实时兜底与自增长目录([liveFetch.ts](partselect-agent/src/server/liveFetch.ts))
+
+当型号或零件号未命中本地目录,Agent 会说*"让我直接去 PartSelect 查一下…"*,用真实浏览器引擎(Playwright)抓取在线页面,用**采集那 620 个零件时同一套解析逻辑**解析,写入目录(`ingestLivePart` / `ensureModel`),再从新写入的行作答——一个越用越全的知识库。
+
+**诚实的运维警告,因为它很重要:** partselect.com 的边缘反爬对**数据中心 IP 返回 403**——已验证连 EC2 上的真实无头 Chromium 都被"Access Denied"。这正是击垮竞品 HTTP 爬虫的同一堵墙。所以可靠的实时抓取需要住宅出口:设 `SCRAPE_PROXY_URL` 指向住宅代理,真实浏览器引擎就能通过。该功能默认关闭(`LIVE_FETCH=1` 开启),被拦截时优雅降级到目录答案——所以 EC2 演示上机制就位且 proxy-ready,而**自有目录**才是让系统稳健的根本,不依赖外部站点。
 
 ---
 
@@ -246,7 +258,11 @@ EC2 t3.small(nginx → systemd 托管的 Next.js,Let's Encrypt TLS,弹性 IP)· 
 
 ## 十一、与公开参考实现的对比
 
-这个案例研究有一个知名的公开实现:[gmunhoz0810/PartSelect-LLM-Assistant](https://github.com/gmunhoz0810/PartSelect-LLM-Assistant)(GPT-4o + FastAPI,作者配有幻灯片讲解)。以下事实均来自其源码(`backend/app.py`)与作者本人的幻灯片。
+我们研究了两个公开实现,并与其中更强的一个做了基准对比。以下事实均来自其源码与(若有)作者幻灯片。
+
+### 11a. 对比 [gmunhoz0810/PartSelect-LLM-Assistant](https://github.com/gmunhoz0810/PartSelect-LLM-Assistant)
+
+GPT-4o + FastAPI,作者配有幻灯片讲解。
 
 **他的设计一句话概括:** 纯 Agent——每个查询都过 GPT-4o,配 4 个 OpenAI 函数调用工具**实时爬取 partselect.com**(BeautifulSoup 解析 CSS 选择器);SQLite 只用来存对话日志;前端是部署在 GitHub Pages 上的非流式聊天。
 
@@ -268,3 +284,16 @@ EC2 t3.small(nginx → systemd 托管的 Next.js,Let's Encrypt TLS,弹性 IP)· 
 **参考实现真正更强的地方——以及我们的回应。** 实时爬取让他拿到*整个* PartSelect 在线目录(约 200 万零件、实时价格)且零存储成本。这是广度上的真实优势,我们直说。但它同时是一个天花板:爬虫能读页面,却永远无法持有库存权威、写入订单、或在页面改版后保证兼容性判断——所以这条路线*无法*满足题目里交易那一半的要求,这也是作者把"依赖 HTML 结构"列为第一条缺点的原因。
 
 这个脆弱性已经不是假设:**截至 2026-06-11,partselect.com 对普通 HTTP 客户端返回 403**(curl 与两个独立的服务端抓取器均验证)。参考实现的逐请求爬取在今天的站点上已无法工作,而本系统依然从自有目录正常作答。我们则从另一个方向补齐了广度差距:**数据摄入契约已经落地**([scripts/ingest-real.ts](partselect-agent/scripts/ingest-real.ts))——通过真实浏览器会话(能通过拦截 HTTP 爬虫的反爬保护)全量采集了 5 个真实型号的完整目录(约 620 个独立零件:真实 PS 号、价格、库存状态,主力零件另有真实症状、难度与安装视频),并合并进事务型 schema。"广度 + 新鲜度"叠加在电商 Agent 之上——而不是替代它。
+
+### 11b. 对比 [annielouu/ecommerce_chat_agent](https://github.com/annielouu/ecommerce_chat_agent)
+
+两个里更强的一个——同样用 **Claude Agent SDK**(claude-haiku-4-5,beta `tool_runner`),配 ChromaDB RAG、自增长知识库(`fetch_page` 缓存抓到的页面)、Playwright-stealth 跨 5 个品牌域 + Serper 全网搜索、范围防护栏,**还有一个视觉变体**(`AppWithVision.js`)。它是一个真正不错的*检索/研究*型 Agent。它(据其 README)明确不做的:购物车、结算、账号、流式。
+
+我们最初对比时,它有两个我们没有的功能——**视觉**和**实时全网兜底**。两个我们都补上了:
+
+| 它有而我们当时没有的功能 | 现状 |
+|---|---|
+| 视觉(图片输入) | ✅ 已实现(§3.5)——Bedrock Converse 读铭牌型号 + 识别零件,线上实测;范围防护栏延伸到图片 |
+| 实时抓取 + 自增长 KB | ✅ 已实现(§3.6)——目录未命中 → 实时抓 partselect → 写入 → 作答;proxy-ready、优雅降级 |
+
+至此检索侧的差距已补平,而**交易、身份、库存权威、流式、部署、自动化测试**的优势仍归我们。两点公平说明:它的 Serper 集成搜的是*多个品牌域*(whirlpool.com、samsung.com…),我们则限定 partselect;它的自增长用独立 ChromaDB,我们则增长关系型目录(这是有意选择——我们长出来的数据是可交易使用的,不只是可检索)。结论:两个项目是两个物种——检索型 Agent 与电商型 Agent——而对一道主职能写明"提供产品信息**并协助客户交易**"的题,我们覆盖了两半,同时补齐了它的检索招牌功能。
