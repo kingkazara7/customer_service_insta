@@ -165,8 +165,8 @@ html, body {
   flex: 0 0 auto; width: 46px; height: 46px; padding: 0;
   display: flex; align-items: center; justify-content: center; line-height: 1;
   border: 1.5px solid var(--ps-border);
-  background: #fff; color: inherit; border-radius: 24px;
-  font-size: 20px; font-weight: 400; cursor: pointer;
+  background: #fff; color: var(--ps-teal); border-radius: 24px;
+  cursor: pointer;
 }
 .composer .camBtn:hover:not(:disabled) { border-color: var(--ps-teal); background: var(--ps-teal-light); }
 .composer .camBtn:disabled { opacity: .5; cursor: default; }
