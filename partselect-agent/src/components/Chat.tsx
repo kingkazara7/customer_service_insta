@@ -323,7 +323,7 @@ export default function Chat() {
         />
         <button
           className="camBtn"
-          title="Upload a photo of your model sticker or a part"
+          title="Upload a photo of your appliance's model/nameplate sticker"
           onClick={() => fileRef.current?.click()}
           disabled={busy}
         >📷</button>

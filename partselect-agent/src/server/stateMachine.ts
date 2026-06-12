@@ -427,13 +427,15 @@ async function handleFaultDesc(s: Session, emit: Emit, text: string): Promise<vo
 }
 
 /**
- * Vision entry: a customer photographed their model sticker or a broken part.
- * Identify it, then route into the existing deterministic flows.
+ * Vision entry: a customer photographed their appliance nameplate.
+ * Scoped to reading the MODEL NUMBER (a reliable OCR task), then routes into
+ * the M-module. We don't try to identify a part from its appearance — that's
+ * unreliable for any vision model, so unclear photos ask the user to type it.
  */
 async function handleImage(
   s: Session, emit: Emit, base64: string, format: "jpeg" | "png" | "gif" | "webp"
 ): Promise<void> {
-  emit({ kind: "text", text: "📷 Looking at your photo…" });
+  emit({ kind: "text", text: "📷 Reading the model number from your photo…" });
   const result = await identifyImage({ base64, format });
 
   if (result.kind === "model") {
@@ -446,31 +448,7 @@ async function handleImage(
     return;
   }
 
-  if (result.kind === "part") {
-    if (result.applianceType) s.applianceType = result.applianceType;
-    emit({
-      kind: "text",
-      text: `That looks like: **${result.description}**. Here's what I found${s.modelNo ? ` for your ${s.modelNo}` : ""}:`,
-    });
-    await recordSearch(s.userId, `image: ${result.description}`, s.modelNo);
-    const hits = await searchParts({
-      query: result.description,
-      applianceType: s.applianceType,
-      modelNo: s.modelNo,
-      limit: 4,
-    });
-    if (hits.length > 0) {
-      await emitPartCards(s, emit, hits);
-    } else {
-      const partNos = await agentMatchParts(s, result.description, emit);
-      const parts = (await Promise.all(partNos.map((no) => getPartByNo(no)))).filter((p): p is Part => !!p);
-      if (parts.length > 0) await emitPartCards(s, emit, parts);
-      else emit({ kind: "text", text: "I recognized the part but couldn't match it in our catalog. Could you tell me your appliance's model number?" });
-    }
-    return;
-  }
-
-  // unclear
+  // unclear → ask the user to type it
   emit({ kind: "text", text: result.reason });
 }
 
