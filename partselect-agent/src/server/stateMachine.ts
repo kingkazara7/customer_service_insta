@@ -491,11 +491,14 @@ async function handleImage(
 
 /** Post-identification home: personalized appliance cards + main menu */
 async function emitHome(s: Session, emit: Emit): Promise<void> {
-  const appliances = await getAppliances(s.userId);
-  if (appliances.length > 0) {
+  // Only "purchased" (confirmed-owned) appliances are shown as the user's machines
+  // and suppress inference. A "searched" row is ephemeral session memory — it must
+  // not turn the appliance-inference experience into a single stale card.
+  const owned = (await getAppliances(s.userId)).filter((a) => a.source === "purchased");
+  if (owned.length > 0) {
     emit({
       kind: "appliance_cards",
-      appliances: appliances.map((a) => ({
+      appliances: owned.map((a) => ({
         modelNo: a.model_no, brand: a.brand,
         applianceType: a.appliance_type, name: a.name, source: a.source,
       })),

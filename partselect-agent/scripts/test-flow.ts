@@ -78,6 +78,18 @@ async function main() {
     !!inferredCards && inferredCards.appliances.every((a) => a.applianceType === "dishwasher"),
     inferredCards?.appliances
   );
+  // Clicking an inferred card persists it as "searched" — but that must NOT
+  // collapse the inference into a single stale card on the next visit.
+  await turn(sm, { type: "select_appliance", modelNo: inferredCards!.appliances[0].modelNo });
+  const smReturn = getSession().id;
+  await turn(smReturn, { type: "init" });
+  evs = await identify(smReturn, "mike@example.com");
+  const reCards = evs.find((e) => e.kind === "appliance_cards") as Extract<ServerEvent, { kind: "appliance_cards" }> | undefined;
+  expect(
+    "a prior 'searched' click does not suppress inference on re-login",
+    texts(evs).includes("likely") && !!reCards && reCards.appliances.every((a) => a.source === "inferred"),
+    reCards?.appliances
+  );
 
   // ── Scenario 1: full purchase flow (broken-appliance branch) ──
   console.log("Scenario 1: broken appliance → diagnose → add to cart → checkout → pay");

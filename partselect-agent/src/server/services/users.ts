@@ -28,7 +28,7 @@ export async function inferModelsFromPurchases(userId: number, limit = 4): Promi
      JOIN order_items oi ON oi.part_id = c.part_id
      JOIN orders o ON o.id = oi.order_id
      WHERE o.user_id = ?
-       AND m.id NOT IN (SELECT model_id FROM user_appliances WHERE user_id = ?)
+       AND m.id NOT IN (SELECT model_id FROM user_appliances WHERE user_id = ? AND source = 'purchased')
      GROUP BY m.id, m.model_no, m.brand, m.appliance_type, m.name
      ORDER BY COUNT(DISTINCT oi.part_id) DESC, m.model_no
      LIMIT ?`,
