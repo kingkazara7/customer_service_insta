@@ -37,7 +37,8 @@ A production-deployed chat agent for the PartSelect e-commerce scenario, scoped 
 | **Live fallback** | On a catalog miss, fetch the part/model from partselect.com, parse it, and **ingest it** (self-growing catalog); proxy-ready, off by default |
 | **Agent** | Claude (Sonnet 4.5) on Amazon Bedrock via the Claude Agent SDK; invoked only at 3 fuzzy nodes; **fully functional no-LLM degraded mode** |
 | **MCP tools** | 9 read-only tools (open standard, reusable/remoteable) |
-| **Two-tier retrieval** | Exact SQL for facts + vector RAG (Titan Embeddings v2, pgvector-ready) with automatic keyword fallback |
+| **Two-tier retrieval** | Exact SQL for facts + vector RAG (Titan Embeddings v2) with automatic keyword fallback |
+| **Database** | Async driver with two backends (`DB_DRIVER`): SQLite for dev, **RDS PostgreSQL in production** |
 | **Real catalog data** | ~620 real parts ingested from partselect.com (real PS numbers, prices, stock, symptoms, videos) |
 | **Scope guardrails** | Three layers keep the agent on refrigerator/dishwasher parts only |
 | **Tests** | 43 automated end-to-end assertions |
@@ -70,7 +71,7 @@ SERVICES  (catalog · orders · users · payments)  ◄── single source of t
    └── LIVE FETCH (liveFetch.ts) — catalog miss → fetch+ingest (proxy-ready)
    │
    ▼
-SQLite (dev & current prod)  /  RDS PostgreSQL + pgvector (migration target)
+Async DB driver (DB_DRIVER) — SQLite (dev) / RDS PostgreSQL (production)
 Amazon Bedrock: Claude Sonnet 4.5 (reasoning + vision) · Titan Embeddings v2
 ```
 
@@ -201,14 +202,14 @@ Stages (`Session.stage` in [session.ts](partselect-agent/src/server/session.ts))
 
 ## 5. Database schema
 
-SQLite in dev and current prod; ANSI-compatible SQL throughout so the RDS PostgreSQL migration only swaps the connection module (instance provisioned, pgvector-ready). Schema: [schema.sql](partselect-agent/src/server/db/schema.sql).
+**Production runs on RDS PostgreSQL**; SQLite is the zero-config dev/offline default. The app talks to an async driver ([driver.ts](partselect-agent/src/server/db/driver.ts)) whose backend is chosen by `DB_DRIVER` (`pg` or `sqlite`), and all SQL is dialect-neutral (`LOWER()=LOWER()` lookups, `?` placeholders, `RETURNING id`, ANSI `ON CONFLICT`), so the same service code runs on both. Schemas: [schema.sql](partselect-agent/src/server/db/schema.sql) (SQLite) · [schema.pg.sql](partselect-agent/src/server/db/schema.pg.sql) (Postgres: `SERIAL`, `TIMESTAMPTZ`, `BYTEA` embeddings).
 
 ```
 appliance_models ──< compatibility >── parts ───1:1─── install_guides
       (18)             (938 pairs)      (664)              (13)
         │                                │ │
         │                                │ └───< doc_chunks (16; optional part link,
-        │                                │        embedding BLOB → 1024-d Titan vector)
+        │                                │        embedding BLOB/BYTEA → 1024-d Titan vector)
         │                                │
         └──< user_appliances >── users   └──< order_items >── orders ──> users
                   (3)            (4 + guests)     (5)           (4)
@@ -262,16 +263,17 @@ npm run test:flow   # 43 end-to-end assertions
 ```
 
 Optional capabilities via env:
+- `DB_DRIVER=pg` with `PGHOST`/`PGPORT`/`PGDATABASE`/`PGUSER`/`PGPASSWORD` → run on PostgreSQL (default is SQLite).
 - `ANTHROPIC_API_KEY` **or** `CLAUDE_CODE_USE_BEDROCK=1` (+ `AGENT_MODEL`) → live Claude reasoning & vision.
 - `EMBEDDINGS_PROVIDER=bedrock npm run embed` → vector RAG with Titan.
 - `LIVE_FETCH=1` (+ `SCRAPE_PROXY_URL` for a residential proxy) → live fallback fetch.
 
-With no keys at all, the app still runs end-to-end in degraded mode (keyword RAG + templates).
+With no keys at all, the app still runs end-to-end on SQLite in degraded mode (keyword RAG + templates).
 
 ---
 
 ## 8. Deployment
 
-Live at **https://customerservice.lambdapen.com**: EC2 t3.small running the Next.js server under **systemd**, behind **nginx** (SSE buffering off) with a **Let's Encrypt** certificate, on an Elastic IP; **Bedrock** (Claude Sonnet 4.5 + Titan v2) via IAM-scoped credentials; **RDS PostgreSQL** provisioned for the migration. Resource inventory: `DEPLOY-INFO.md`. Deploy = `db:seed → ingest → embed → systemctl restart partselect`.
+Live at **https://customerservice.lambdapen.com**: EC2 t3.small running the Next.js server under **systemd**, behind **nginx** (SSE buffering off) with a **Let's Encrypt** certificate, on an Elastic IP; **RDS PostgreSQL** as the production database (`DB_DRIVER=pg`); **Bedrock** (Claude Sonnet 4.5 + Titan v2) via IAM-scoped credentials. Resource inventory: `DEPLOY-INFO.md`. One-time data load = `db:seed → ingest → embed` against RDS; routine deploy = build + `systemctl restart partselect`.
 
-**Next step:** SQLite → RDS migration (async `pg` refactor of the service layer + pgvector for `doc_chunks`).
+**Possible next step:** swap the in-process cosine for a real pgvector `vector(1024)` column + `<=>` operator (the BYTEA embedding column is a drop-in upgrade).

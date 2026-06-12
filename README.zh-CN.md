@@ -37,7 +37,8 @@
 | **实时兜底** | 目录未命中时,实时抓取 partselect.com 页面、解析、**写入目录**(自增长);proxy-ready,默认关闭 |
 | **Agent** | Claude(Sonnet 4.5)on Amazon Bedrock,经 Claude Agent SDK;仅在 3 个模糊节点调用;**无 LLM 也完整可用的降级模式** |
 | **MCP 工具** | 9 个只读工具(开放标准,可复用、可远程化) |
-| **双层检索** | 结构化事实走精确 SQL + 向量 RAG(Titan Embeddings v2,pgvector-ready),关键词自动兜底 |
+| **双层检索** | 结构化事实走精确 SQL + 向量 RAG(Titan Embeddings v2),关键词自动兜底 |
+| **数据库** | 异步驱动双后端(`DB_DRIVER`):开发用 SQLite,**生产用 RDS PostgreSQL** |
 | **真实目录数据** | 从 partselect.com 摄入约 620 个真实零件(真实 PS 号、价格、库存、症状、视频) |
 | **范围防护栏** | 三层防护把 Agent 锁定在冰箱/洗碗机配件 |
 | **测试** | 43 项自动化端到端断言 |
@@ -70,7 +71,7 @@
    └── 实时抓取(liveFetch.ts)—— 目录未命中 → 抓取+写入(proxy-ready)
    │
    ▼
-SQLite(开发 & 当前生产)/ RDS PostgreSQL + pgvector(迁移目标)
+异步 DB 驱动(DB_DRIVER)—— SQLite(开发)/ RDS PostgreSQL(生产)
 Amazon Bedrock:Claude Sonnet 4.5(推理 + 视觉)· Titan Embeddings v2
 ```
 
@@ -201,7 +202,7 @@ Amazon Bedrock:Claude Sonnet 4.5(推理 + 视觉)· Titan Embeddings v2
 
 ## 五、数据库 schema
 
-开发与当前生产用 SQLite;全程 ANSI 兼容 SQL,因此 RDS PostgreSQL 迁移只需替换连接模块(实例已就绪,pgvector-ready)。Schema:[schema.sql](partselect-agent/src/server/db/schema.sql)。
+**生产跑在 RDS PostgreSQL 上**;SQLite 是零配置的开发/离线默认。应用通过异步驱动([driver.ts](partselect-agent/src/server/db/driver.ts))访问数据库,后端由 `DB_DRIVER`(`pg` 或 `sqlite`)选择;全程方言中立 SQL(`LOWER()=LOWER()` 查询、`?` 占位符、`RETURNING id`、ANSI `ON CONFLICT`),同一套服务代码两个后端通用。Schema:[schema.sql](partselect-agent/src/server/db/schema.sql)(SQLite)·[schema.pg.sql](partselect-agent/src/server/db/schema.pg.sql)(Postgres:`SERIAL`、`TIMESTAMPTZ`、`BYTEA` 向量列)。
 
 ```
 appliance_models ──< compatibility >── parts ───1:1─── install_guides
@@ -262,16 +263,17 @@ npm run test:flow   # 43 项端到端断言
 ```
 
 可选能力(环境变量):
+- `DB_DRIVER=pg` 配 `PGHOST`/`PGPORT`/`PGDATABASE`/`PGUSER`/`PGPASSWORD` → 跑在 PostgreSQL 上(默认 SQLite)。
 - `ANTHROPIC_API_KEY` **或** `CLAUDE_CODE_USE_BEDROCK=1`(+ `AGENT_MODEL`)→ 真实 Claude 推理与视觉。
 - `EMBEDDINGS_PROVIDER=bedrock npm run embed` → Titan 向量 RAG。
 - `LIVE_FETCH=1`(+ `SCRAPE_PROXY_URL` 住宅代理)→ 实时兜底抓取。
 
-不配任何 key 时,应用仍以降级模式(关键词 RAG + 模板)端到端运行。
+不配任何 key 时,应用仍以 SQLite + 降级模式(关键词 RAG + 模板)端到端运行。
 
 ---
 
 ## 八、部署
 
-线上 **https://customerservice.lambdapen.com**:EC2 t3.small 用 **systemd** 托管 Next.js,前面是 **nginx**(SSE 关缓冲)+ **Let's Encrypt** 证书,绑弹性 IP;**Bedrock**(Claude Sonnet 4.5 + Titan v2)走 IAM 限权凭证;**RDS PostgreSQL** 已为迁移就绪。资源清单见 `DEPLOY-INFO.md`。部署顺序 = `db:seed → ingest → embed → systemctl restart partselect`。
+线上 **https://customerservice.lambdapen.com**:EC2 t3.small 用 **systemd** 托管 Next.js,前面是 **nginx**(SSE 关缓冲)+ **Let's Encrypt** 证书,绑弹性 IP;**RDS PostgreSQL** 作为生产数据库(`DB_DRIVER=pg`);**Bedrock**(Claude Sonnet 4.5 + Titan v2)走 IAM 限权凭证。资源清单见 `DEPLOY-INFO.md`。一次性灌数据 = `db:seed → ingest → embed`(对 RDS);日常部署 = 构建 + `systemctl restart partselect`。
 
-**下一步:** SQLite → RDS 迁移(服务层异步 `pg` 重构 + `doc_chunks` 上 pgvector)。
+**可选下一步:** 把进程内余弦换成真正的 pgvector `vector(1024)` 列 + `<=>` 操作符(当前 BYTEA 向量列可平滑升级)。

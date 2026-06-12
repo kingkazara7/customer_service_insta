@@ -16,12 +16,15 @@
 - `instalily-web-sg` = sg-0ee11c942d565ab00(80/443 公开,22 仅限本机 IP)
 - `instalily-db-sg` = sg-08e90a1dbf05d77b8(5432 仅允许 web-sg)
 
-## RDS
-- 标识符: `instalily-db`,PostgreSQL,db.t4g.micro,20GB gp3
+## RDS（生产数据库,已接入 ✅）
+- 标识符: `instalily-db`,PostgreSQL 18.3,db.t4g.micro,20GB gp3
 - 数据库名: `partselect`,用户: `psadmin`
 - 密码: 见本目录 `.deploy-secrets`(已 gitignore,勿提交)
-- 不对公网开放,只能从 EC2 访问
-- Endpoint: `instalily-db.cnak2yye03in.us-east-2.rds.amazonaws.com:5432`(状态 available)
+- 不对公网开放,只能从 EC2 访问(安全组 5432 仅限 web-sg)
+- Endpoint: `instalily-db.cnak2yye03in.us-east-2.rds.amazonaws.com:5432`
+- 应用通过 `DB_DRIVER=pg` + PG* 环境变量(已写入 `/etc/partselect.env`)连接
+- 数据已灌入:18 型号 / 664 零件 / 938 兼容对 / 13 指南 / 16 向量块
+- 重新灌数据(对 RDS):EC2 上 `set -a; . /etc/partselect.env; set +a; npm run db:seed && npm run ingest && npm run embed`(⚠️ db:seed 会清空全表)
 
 ## Bedrock(us-east-2 可见)
 - 对话模型: anthropic.claude-* 系列(待 invoke 测试确认访问权限)
