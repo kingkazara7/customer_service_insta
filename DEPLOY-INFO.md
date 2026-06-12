@@ -1,42 +1,42 @@
-# Instalily PartSelect Agent — AWS 部署信息
+# Instalily PartSelect Agent — AWS Deployment Info
 
-> 区域: us-east-2 | 账号: 554487657884 | 创建日期: 2026-06-11
+> Region: us-east-2 | Account: 554487657884 | Created: 2026-06-11
 
 ## EC2
-- 实例 ID: `i-01c8fe9496075c166`
-- Name 标签: `instalily_project`
-- 类型: t3.small (2 vCPU / 2GB), Ubuntu 24.04, 30GB gp3
-- 弹性 IP(固定): `18.227.30.139` ← 当前演示地址 http://18.227.30.139/
-- SSH: `ssh -i instalily-key.pem ubuntu@18.227.30.139`(密钥在本目录,仅允许 76.36.238.226 访问)
-- 应用: /home/ubuntu/app/partselect-agent,systemd 服务 `partselect`(开机自启)
-- 环境变量: /etc/partselect.env(root:ubuntu 640);nginx 反代 80→3000(SSE 已关缓冲)
-- 常用命令: `sudo systemctl restart partselect` / `journalctl -u partselect -f`
+- Instance ID: `i-01c8fe9496075c166`
+- Name tag: `instalily_project`
+- Type: t3.small (2 vCPU / 2 GB), Ubuntu 24.04, 30 GB gp3
+- Elastic IP (static): `18.227.30.139` ← demo address http://18.227.30.139/
+- SSH: `ssh -i instalily-key.pem ubuntu@18.227.30.139` (key in this folder; access restricted to 76.36.238.226)
+- App: /home/ubuntu/app/partselect-agent, systemd service `partselect` (starts on boot)
+- Env file: /etc/partselect.env (root:ubuntu 640); nginx reverse-proxies 80→3000 (SSE buffering off)
+- Common commands: `sudo systemctl restart partselect` / `journalctl -u partselect -f`
 
-## 安全组
-- `instalily-web-sg` = sg-0ee11c942d565ab00(80/443 公开,22 仅限本机 IP)
-- `instalily-db-sg` = sg-08e90a1dbf05d77b8(5432 仅允许 web-sg)
+## Security groups
+- `instalily-web-sg` = sg-0ee11c942d565ab00 (80/443 public, 22 limited to home IP)
+- `instalily-db-sg` = sg-08e90a1dbf05d77b8 (5432 allowed only from web-sg)
 
-## RDS（生产数据库,已接入 ✅）
-- 标识符: `instalily-db`,PostgreSQL 18.3,db.t4g.micro,20GB gp3
-- 数据库名: `partselect`,用户: `psadmin`
-- 密码: 见本目录 `.deploy-secrets`(已 gitignore,勿提交)
-- 不对公网开放,只能从 EC2 访问(安全组 5432 仅限 web-sg)
+## RDS (production database, live ✅)
+- Identifier: `instalily-db`, PostgreSQL 18.3, db.t4g.micro, 20 GB gp3
+- Database: `partselect`, user: `psadmin`
+- Password: see `.deploy-secrets` in this folder (gitignored — do not commit)
+- Not publicly accessible; reachable only from EC2 (security group allows 5432 from web-sg)
 - Endpoint: `instalily-db.cnak2yye03in.us-east-2.rds.amazonaws.com:5432`
-- 应用通过 `DB_DRIVER=pg` + PG* 环境变量(已写入 `/etc/partselect.env`)连接
-- 数据已灌入:18 型号 / 664 零件 / 938 兼容对 / 13 指南 / 16 向量块
-- 重新灌数据(对 RDS):EC2 上 `set -a; . /etc/partselect.env; set +a; npm run db:seed && npm run ingest && npm run embed`(⚠️ db:seed 会清空全表)
+- App connects via `DB_DRIVER=pg` + PG* env vars (already in `/etc/partselect.env`)
+- Data loaded: 18 models / 664 parts / 938 compatibility pairs / 13 guides / 16 vector chunks
+- Reload data (against RDS), on EC2: `set -a; . /etc/partselect.env; set +a; npm run db:seed && npm run ingest && npm run embed` (⚠️ db:seed wipes all tables)
 
-## Bedrock(us-east-2 可见)
-- 对话模型: anthropic.claude-* 系列(待 invoke 测试确认访问权限)
-- Embedding: `amazon.titan-embed-text-v2:0`(1024 维)
+## Bedrock (us-east-2)
+- Chat models: anthropic.claude-* family (use case form submitted; sonnet-4-5 inference profile in use)
+- Embeddings: `amazon.titan-embed-text-v2:0` (1024-dim)
 
-## 网络
-- VPC: vpc-04f8d9b58c18c2c6c(默认)
-- 子网: subnet-0efceaeb404466c32 (us-east-2c)
+## Network
+- VPC: vpc-04f8d9b58c18c2c6c (default)
+- Subnet: subnet-0efceaeb404466c32 (us-east-2c)
 - AMI: ami-0ea1cddefe0c4aed5 (ubuntu-noble-24.04, 20260610)
 
-## 待办
-- [ ] Elastic IP 绑定
-- [ ] RDS endpoint 记录
-- [ ] Bedrock invoke 权限实测
-- [ ] 域名 Route53 解析 + ACM/certbot 证书(域名待用户提供)
+## Status
+- [x] Elastic IP associated
+- [x] RDS endpoint recorded; database migrated and live
+- [x] Bedrock invoke access verified (Anthropic use case form submitted)
+- [x] Domain + TLS: customerservice.lambdapen.com via Cloudflare DNS + Let's Encrypt (certbot)
