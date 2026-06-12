@@ -51,6 +51,18 @@ function deflectOutOfScope(s: Session, emit: Emit): void {
   backToMenu(s, emit);
 }
 
+/**
+ * If the input is a single code-like token (a PartSelect number OR a
+ * manufacturer part number that resolves to a real part), return that part.
+ * Lets users paste the manufacturer number printed on their old part — or the
+ * one the assistant cited — and have it resolve like a part number.
+ */
+async function resolvePartCode(text: string): Promise<Part | undefined> {
+  const t = text.trim();
+  if (/\s/.test(t) || t.length < 5 || t.length > 20 || !/\d/.test(t)) return undefined;
+  return getPartByNo(t);
+}
+
 /** Infer the appliance type from free text (used when the user describes instead of giving a model). */
 function detectApplianceType(text: string): "refrigerator" | "dishwasher" | undefined {
   if (/dish ?washer|\bdish\b/i.test(text)) return "dishwasher";
@@ -297,6 +309,12 @@ async function routeFreeText(s: Session, emit: Emit, text: string): Promise<void
   // Shortcut 4: bare part number → part card
   if (partNoMatch) {
     await lookupPartFlow(s, emit, partNoMatch[0].toUpperCase());
+    return;
+  }
+  // Shortcut 4b: bare manufacturer part number (e.g. one the assistant cited) → part card
+  const codePart = await resolvePartCode(text);
+  if (codePart) {
+    await lookupPartFlow(s, emit, codePart.part_no);
     return;
   }
   // Shortcut 5: repair phrasing → broken branch (with model detection)
@@ -842,11 +860,16 @@ export async function handleEvent(
         case "await_model": {
           if (isOutOfScope(text)) { deflectOutOfScope(s, emit); break; }
           // The user was asked for a model but people often type something else.
-          // A part number → handle the part. A model number → look it up.
-          // Anything else is a description → continue by intent instead of dead-ending.
+          // A part number (PS or manufacturer) → handle the part. A model number →
+          // look it up. Anything else is a description → continue by intent.
           const partMatch = text.match(PART_NO_RE);
           if (partMatch) {
             await lookupPartFlow(s, emit, partMatch[0].toUpperCase());
+            break;
+          }
+          const codePart = await resolvePartCode(text);
+          if (codePart) {
+            await lookupPartFlow(s, emit, codePart.part_no);
             break;
           }
           const m = text.match(MODEL_NO_RE);
@@ -868,6 +891,10 @@ export async function handleEvent(
         }
         case "await_fault_desc": {
           if (isOutOfScope(text)) { deflectOutOfScope(s, emit); break; }
+          // The user may paste a part number (e.g. one the assistant cited) instead
+          // of describing the fault — resolve it (PS or manufacturer number).
+          const codePart = await resolvePartCode(text);
+          if (codePart) { await lookupPartFlow(s, emit, codePart.part_no); break; }
           await handleFaultDesc(s, emit, text);
           break;
         }
@@ -878,6 +905,8 @@ export async function handleEvent(
         }
         case "await_part_desc": {
           if (isOutOfScope(text)) { deflectOutOfScope(s, emit); break; }
+          const codePart = await resolvePartCode(text);
+          if (codePart) { await lookupPartFlow(s, emit, codePart.part_no); break; }
           await handlePartDesc(s, emit, text);
           break;
         }

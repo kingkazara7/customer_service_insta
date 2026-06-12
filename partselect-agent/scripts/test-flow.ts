@@ -232,6 +232,34 @@ async function main() {
     !texts(evs).includes("Sorry, we couldn't find the part you're looking for."),
     texts(evs).slice(0, 200));
 
+  // ── Scenario 8d: manufacturer part number resolves like a PartSelect number ──
+  // (regression: the assistant cites a mfr number like WPW10321304; the user pastes
+  //  it back and must get the part, not "couldn't find part".)
+  console.log("Scenario 8d: manufacturer-number lookup");
+  const s8d = getSession().id;
+  await turn(s8d, { type: "init" });
+  await identify(s8d);
+  // At the model prompt
+  await turn(s8d, { type: "menu_choice", choice: "broken" });
+  evs = await turn(s8d, { type: "text", text: "WPW10321304" });
+  expect("mfr number at model prompt → part card",
+    kinds(evs).includes("part_cards") && !texts(evs).includes("couldn't find part"),
+    kinds(evs));
+  expect("resolves to the right PartSelect number",
+    !!(evs.find((e) => e.kind === "part_cards") as Extract<ServerEvent, { kind: "part_cards" }> | undefined)
+      ?.parts.some((p) => p.partNo === "PS11752778"),
+    (evs.find((e) => e.kind === "part_cards") as Extract<ServerEvent, { kind: "part_cards" }> | undefined)?.parts);
+  // In the pre-order "I know the part number" branch
+  const s8e = getSession().id;
+  await turn(s8e, { type: "init" });
+  await identify(s8e);
+  await turn(s8e, { type: "menu_choice", choice: "preorder" });
+  await turn(s8e, { type: "know_partno", value: true });
+  evs = await turn(s8e, { type: "text", text: "WPW10321304" });
+  expect("mfr number at part-number prompt → part card",
+    kinds(evs).includes("part_cards") && !texts(evs).includes("couldn't find part"),
+    kinds(evs));
+
   // ── Scenario 9: self-cleaning guidance (case: clogged dishwasher) ──
   console.log("Scenario 9: self-cleaning guidance");
   const s9 = getSession().id;

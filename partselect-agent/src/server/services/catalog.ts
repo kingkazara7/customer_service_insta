@@ -37,10 +37,12 @@ export type InstallGuide = {
 const PART_COLS =
   "id, part_no, mfr_part_no, name, description, appliance_type, brand, price, stock_qty, image_url, product_url, symptoms";
 
+/** Look up a part by its PartSelect number OR its manufacturer part number. */
 export async function getPartByNo(partNo: string): Promise<Part | undefined> {
+  const q = partNo.trim();
   return db().get<Part>(
-    `SELECT ${PART_COLS} FROM parts WHERE LOWER(part_no) = LOWER(?)`,
-    [partNo.trim()]
+    `SELECT ${PART_COLS} FROM parts WHERE LOWER(part_no) = LOWER(?) OR LOWER(mfr_part_no) = LOWER(?)`,
+    [q, q]
   );
 }
 
