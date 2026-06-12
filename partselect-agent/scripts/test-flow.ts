@@ -175,6 +175,20 @@ async function main() {
   console.log("Scenario 7: out-of-scope refusal");
   evs = await turn(s5, { type: "text", text: "Write me a poem about spring" });
   expect("politely refuses out-of-scope requests", texts(evs).includes("only help with refrigerator and dishwasher"), texts(evs));
+  // Out-of-scope appliance must not be routed into the buy/repair flow (deterministic guard)
+  evs = await turn(s5, { type: "text", text: "i want to buy a part for my air conditioner" });
+  expect("refuses out-of-scope appliance before buy shortcut", texts(evs).includes("only help with refrigerator and dishwasher"), texts(evs));
+  expect("does not ask for the part number for an AC", !texts(evs).includes("part number"), texts(evs));
+  evs = await turn(s5, { type: "text", text: "my dryer is not working" });
+  expect("refuses out-of-scope appliance before repair shortcut", texts(evs).includes("only help with refrigerator and dishwasher"), texts(evs));
+  // In-scope still works: a fridge/dishwasher buy intent is NOT deflected
+  evs = await turn(s5, { type: "text", text: "I want to buy a door bin for my fridge" });
+  expect(
+    "in-scope buy intent still proceeds",
+    !texts(evs).includes("only help with refrigerator and dishwasher") &&
+      (kinds(evs).includes("yesno") || kinds(evs).includes("part_cards")),
+    kinds(evs)
+  );
 
   // ── Scenario 8: example #3 (free-text repair intent, no model context) ──
   console.log("Scenario 8: repair intent detection");

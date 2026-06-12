@@ -26,7 +26,30 @@ const PART_NO_RE = /PS\d{6,9}/i;
 const MODEL_NO_RE = /\b(?!PS\d)[A-Z]{2,4}\d{3}[A-Z0-9]{2,9}\b/i;
 
 const APOLOGY = "Sorry, we couldn't find the part you're looking for.";
+const OUT_OF_SCOPE_MSG =
+  "Sorry, I can only help with refrigerator and dishwasher parts.";
 const EMAIL_RE = /[^\s@]+@[^\s@]+\.[^\s@]{2,}/;
+
+// Appliances we explicitly do NOT serve. High-confidence terms only, to avoid
+// false positives (e.g. "washer" is skipped — it's also a ring-shaped part, and
+// "dishwasher" contains it). "freezer" is intentionally absent (part of a fridge).
+const OUT_OF_SCOPE_RE =
+  /air[\s-]?con|\bdryer|washing machine|clothes washer|\blaundry\b|\boven\b|\bstove\b|microwave|water heater|garbage disposal|\bfurnace|\btoaster|\bblender|\bgrill\b/i;
+
+/**
+ * Deflect non-refrigerator/dishwasher appliances before the deterministic
+ * intent shortcuts (buy/repair) can route them. A part number or known model in
+ * the message overrides this — those are unambiguously in-catalog.
+ */
+function isOutOfScope(text: string): boolean {
+  if (PART_NO_RE.test(text)) return false;
+  return OUT_OF_SCOPE_RE.test(text);
+}
+
+function deflectOutOfScope(s: Session, emit: Emit): void {
+  emit({ kind: "text", text: OUT_OF_SCOPE_MSG });
+  backToMenu(s, emit);
+}
 
 function applianceTypeName(t: string): string {
   return t === "refrigerator" ? "refrigerator" : "dishwasher";
@@ -256,6 +279,12 @@ async function routeFreeText(s: Session, emit: Emit, text: string): Promise<void
   // Shortcut 3: pronoun ("this part") + compatibility → most recently shown part
   if (!partNoMatch && wantsCompat && s.lastPartNos.length > 0) {
     await answerCompatibility(s, emit, s.lastPartNos[0], modelMatch?.[0]?.toUpperCase());
+    return;
+  }
+  // Scope guard: deflect non-fridge/dishwasher appliances before buy/repair
+  // shortcuts route them (a part number in the message overrides this).
+  if (isOutOfScope(text)) {
+    deflectOutOfScope(s, emit);
     return;
   }
   // Shortcut 4: bare part number → part card
@@ -789,15 +818,17 @@ export async function handleEvent(
       if (!text) break;
       switch (s.stage) {
         case "await_email": {
-          identifyUser(s, emit, text);
+          await identifyUser(s, emit, text);
           break;
         }
         case "await_model": {
+          if (isOutOfScope(text)) { deflectOutOfScope(s, emit); break; }
           const m = text.match(MODEL_NO_RE);
           await modelLookupFlow(s, emit, (m?.[0] ?? text).toUpperCase());
           break;
         }
         case "await_fault_desc": {
+          if (isOutOfScope(text)) { deflectOutOfScope(s, emit); break; }
           await handleFaultDesc(s, emit, text);
           break;
         }
@@ -807,6 +838,7 @@ export async function handleEvent(
           break;
         }
         case "await_part_desc": {
+          if (isOutOfScope(text)) { deflectOutOfScope(s, emit); break; }
           pushHistory(s, "user", text);
           await recordSearch(s.userId, text, s.modelNo);
           // Deterministic search first (zero tokens); the agent only runs if it finds nothing
