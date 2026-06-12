@@ -41,8 +41,41 @@
 | **数据库** | 异步驱动双后端(`DB_DRIVER`):开发用 SQLite,**生产用 RDS PostgreSQL** |
 | **真实目录数据** | 从 partselect.com 摄入约 620 个真实零件(真实 PS 号、价格、库存、症状、视频) |
 | **范围防护栏** | 三层防护把 Agent 锁定在冰箱/洗碗机配件 |
-| **测试** | 43 项自动化端到端断言 |
+| **测试** | 49 项自动化端到端断言 |
 | **部署** | EC2 + nginx + systemd + Let's Encrypt TLS + 自有域名;Bedrock 走 IAM |
+
+---
+
+## 一点五、测试账号与案例
+
+打开 **https://customerservice.lambdapen.com**,用下面任一账号开始。每个种子账号演示不同的个性化路径(数据存在 RDS):
+
+| 登录 | 角色 | 登录后看到 | 演示什么 |
+|---|---|---|---|
+| `demo@example.com` | 已购 2 台家电 + 订单历史 | "Welcome back, Demo User" · ✓ Owned 卡片(WDT780SAEM1 洗碗机、WRS325SDHZ01 冰箱)· 预填地址 | 完整历史、已购家电卡片、地址预填 |
+| `mike@example.com` | **只买过零件**、没登记机器 | "Based on the parts you've purchased…" + "Likely yours" 卡片 | 由购买历史**反推机型** |
+| `sarah@example.com` | 已购一台冰箱(WRF555SDFZ09)+ 滤芯订单 | 她的冰箱卡片 | 单家电老客户 |
+| `lisa@example.com` | 买过一个 Samsung 零件 | 反推出 Samsung 冰箱(RF28R7351SR) | 跨品牌反推 |
+| *任意新邮箱* | 首次访客 | "Account created"(无历史) | 新账号建档 |
+| **Continue as guest** | 匿名 | 全功能、无历史 | 游客模式(懒建档) |
+
+**案例脚本(在聊天框输入):**
+
+| 测试项 | 输入 | 预期 |
+|---|---|---|
+| 安装(0 token) | `How can I install part number PS11752778?` | 结构化安装卡片(步骤、视频) |
+| 兼容性(0 token) | `Is PS11752778 compatible with WRS325SDHZ01?` | ✅ 兼容 + 零件卡片 |
+| 不兼容 | `Is PS11752778 compatible with WDT780SAEM1?` | ❌ 不兼容(它是冰箱件) |
+| 故障诊断(LLM+RAG) | 选 **My appliance is broken** → 型号 `WRS325SDHZ01` → `ice maker not working` | 自助排查步骤 + 推荐零件卡片 |
+| 自助保养 | `my dishwasher is clogged and smells, how do I clean it?` | 滤网清洗/清洁片循环步骤 + 清洁用品 |
+| 真实目录数据 | `PS9494999`($79.80 加热元件)· `PS17629131`($146.56 制冰机套件) | 真实零件卡片 |
+| 库存状态 | `PS11754026`(零库存演示件) | "缺货"提示 |
+| 超范围拒绝 | `write me a poem` · `buy a part for my air conditioner` | 礼貌拒绝、回主菜单 |
+| **完整购买** | 加购零件 → **Checkout** → 地址 → 卡号 `4242 4242 4242 4242` | 订单确认,**持久化到 RDS** |
+
+**📷 视觉(游客即可测):** 点相机按钮上传一张家电铭牌照片。仓库里附了示例图:[docs/test-nameplate-WRS325SDHZ01.jpg](docs/test-nameplate-WRS325SDHZ01.jpg) —— 也可以直接拍自己家冰箱/洗碗机的铭牌。预期:*"I read the model number **WRS325SDHZ01** from your photo"* → 进入流程。
+
+> **扫到的型号会入库吗?** 会。当识别出的型号在目录中时,它会写入 RDS 的 `search_history`(查询日志)和 `user_appliances`(作为"searched"机器)——所以扫一次铭牌,下次进来这台机器就成了家电卡片。**图片本身不存**:照片发给 Bedrock 做 OCR 后即丢弃,只保留识别出的型号文本。
 
 ---
 

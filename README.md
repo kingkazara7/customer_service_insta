@@ -41,8 +41,41 @@ A production-deployed chat agent for the PartSelect e-commerce scenario, scoped 
 | **Database** | Async driver with two backends (`DB_DRIVER`): SQLite for dev, **RDS PostgreSQL in production** |
 | **Real catalog data** | ~620 real parts ingested from partselect.com (real PS numbers, prices, stock, symptoms, videos) |
 | **Scope guardrails** | Three layers keep the agent on refrigerator/dishwasher parts only |
-| **Tests** | 43 automated end-to-end assertions |
+| **Tests** | 49 automated end-to-end assertions |
 | **Deployment** | EC2 + nginx + systemd + Let's Encrypt TLS on a custom domain; Bedrock via IAM |
+
+---
+
+## 1.5 Test accounts & scenarios
+
+Open **https://customerservice.lambdapen.com** and start with one of these. Each seeded account demonstrates a different personalization path (data lives in RDS):
+
+| Login | Persona | What loads | Demonstrates |
+|---|---|---|---|
+| `demo@example.com` | Owns 2 appliances + order history | "Welcome back, Demo User" · ✓ Owned cards (WDT780SAEM1 dishwasher, WRS325SDHZ01 fridge) · saved address | full history, owned-appliance cards, address pre-fill |
+| `mike@example.com` | Bought **parts only**, no registered machine | "Based on the parts you've purchased, your appliance is likely one of these" + "Likely yours" cards | **appliance inference** from purchase history |
+| `sarah@example.com` | Owns a fridge (WRF555SDFZ09) + filter orders | her fridge card | single-appliance returning customer |
+| `lisa@example.com` | Bought one Samsung part | inferred Samsung fridge (RF28R7351SR) | cross-brand inference |
+| *any new email* | First-time visitor | "Account created" (no history) | new-account creation |
+| **Continue as guest** | Anonymous | full functionality, no history | guest mode (lazily created) |
+
+**Scenario scripts (type these in chat):**
+
+| What to test | Input | Expected |
+|---|---|---|
+| Installation (0 tokens) | `How can I install part number PS11752778?` | structured install card (steps, video) |
+| Compatibility (0 tokens) | `Is PS11752778 compatible with WRS325SDHZ01?` | ✅ Compatible + part card |
+| Incompatibility | `Is PS11752778 compatible with WDT780SAEM1?` | ❌ Not compatible (it's a fridge part) |
+| Fault diagnosis (LLM+RAG) | choose **My appliance is broken** → model `WRS325SDHZ01` → `ice maker not working` | self-help steps + recommended part cards |
+| Self-maintenance | `my dishwasher is clogged and smells, how do I clean it?` | filter-rinse / cleaner-cycle steps + cleaning supplies |
+| Real catalog data | `PS9494999` ($79.80 heating element) · `PS17629131` ($146.56 ice maker kit) | real part cards |
+| Stock states | `PS11754026` (zero-stock demo part) | "out of stock" notice |
+| Out-of-scope refusal | `write me a poem` · `buy a part for my air conditioner` | polite refusal, back to menu |
+| **Full purchase** | add a part to cart → **Checkout** → address → card `4242 4242 4242 4242` | order confirmed, **persisted to RDS** |
+
+**📷 Vision (guest-friendly):** click the camera button and upload a photo of an appliance nameplate. Sample image in the repo: [docs/test-nameplate-WRS325SDHZ01.jpg](docs/test-nameplate-WRS325SDHZ01.jpg) — or photograph your own fridge/dishwasher rating plate. Expected: *"I read the model number **WRS325SDHZ01** from your photo"* → flow continues.
+
+> **Does the scanned model get stored?** Yes. When the recognized model exists in the catalog, it is written to `search_history` (query log) and `user_appliances` (as a "searched" machine) in RDS — so a scanned nameplate becomes an appliance card on the account's next visit. The **image bytes are not stored**: the photo is sent to Bedrock for OCR and discarded; only the recognized model text persists.
 
 ---
 
