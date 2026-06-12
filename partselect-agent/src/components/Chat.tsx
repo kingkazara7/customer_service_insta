@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ClientEvent, ServerEvent, CartView } from "@/shared/protocol";
+import type { ClientEvent, ServerEvent } from "@/shared/protocol";
 import {
   ApplianceCards, MenuButtons, YesNoButtons, PartCards, Chips,
   InstallCard, CartBox, AddressForm, PaymentForm, OrderConfirmed, EmailForm,
@@ -26,8 +26,6 @@ export default function Chat() {
   const [feed, setFeed] = useState<FeedItem[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [cart, setCart] = useState<CartView>({ items: [], total: 0, count: 0 });
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const sessionIdRef = useRef<string | null>(null);
   const feedRef = useRef<HTMLDivElement>(null);
   const initedRef = useRef(false);
@@ -63,10 +61,6 @@ export default function Chat() {
             if (!line.startsWith("data: ")) continue;
             const sev = JSON.parse(line.slice(6)) as ServerEvent;
             if (sev.kind === "done") continue;
-            if (sev.kind === "cart") setCart(sev.cart);
-            if (sev.kind === "order_confirmed") {
-              setCart({ items: [], total: 0, count: 0 });
-            }
             if (sev.kind === "agent_delta") {
               // merge streamed LLM text into a single bubble
               if (agentBubbleId === null) {
@@ -288,10 +282,6 @@ export default function Chat() {
           <span className="logo">Part<em>Select</em></span>
           <span className="tag">Parts Assistant · Refrigerators &amp; Dishwashers</span>
         </div>
-        <button className="cartBtn" onClick={() => setDrawerOpen(true)}>
-          🛒 Cart
-          {cart.count > 0 && <span className="badge">{cart.count}</span>}
-        </button>
       </header>
 
       <div className="feed" ref={feedRef}>
@@ -346,26 +336,6 @@ export default function Chat() {
         />
         <button onClick={submitText} disabled={busy || !input.trim()}>Send</button>
       </div>
-
-      {drawerOpen && (
-        <>
-          <div className="drawerMask" onClick={() => setDrawerOpen(false)} />
-          <div className="drawer">
-            <h3>🛒 Cart</h3>
-            <CartBox
-              cart={cart}
-              onRemove={(no) => {
-                setDrawerOpen(false);
-                userEcho(`Remove: ${no}`, { type: "remove_from_cart", partNo: no });
-              }}
-              onCheckout={() => {
-                setDrawerOpen(false);
-                userEcho("Checkout", { type: "checkout" });
-              }}
-            />
-          </div>
-        </>
-      )}
     </div>
   );
 }
