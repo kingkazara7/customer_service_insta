@@ -198,6 +198,28 @@ async function main() {
   evs = await turn(s8, { type: "text", text: "The ice maker on my Whirlpool fridge is not working. How can I fix it?" });
   expect("detects repair intent and asks for the model", texts(evs).includes("model number"), texts(evs));
 
+  // ── Scenario 8b: forgiving "await_model" (user types a part number or a description) ──
+  console.log("Scenario 8b: forgiving model prompt");
+  const s8b = getSession().id;
+  await turn(s8b, { type: "init" });
+  await identify(s8b);
+  await turn(s8b, { type: "menu_choice", choice: "broken" });   // asks for model
+  evs = await turn(s8b, { type: "text", text: "PS11752778" });    // user types a PART number instead
+  expect("part number at model prompt → part card, not apology",
+    kinds(evs).includes("part_cards") && !texts(evs).includes("couldn't find the part"),
+    kinds(evs));
+  const s8c = getSession().id;
+  await turn(s8c, { type: "init" });
+  await identify(s8c);
+  await turn(s8c, { type: "menu_choice", choice: "broken" });
+  evs = await turn(s8c, { type: "text", text: "the dishwasher heating part is broken" });
+  expect("fault description at model prompt → diagnosis, not apology",
+    kinds(evs).includes("part_cards") || texts(evs).toLowerCase().includes("troubleshoot") || texts(evs).toLowerCase().includes("heating"),
+    texts(evs).slice(0, 200));
+  expect("does not dead-end with the generic apology",
+    !texts(evs).includes("Sorry, we couldn't find the part you're looking for."),
+    texts(evs).slice(0, 200));
+
   // ── Scenario 9: self-cleaning guidance (case: clogged dishwasher) ──
   console.log("Scenario 9: self-cleaning guidance");
   const s9 = getSession().id;

@@ -51,6 +51,13 @@ function deflectOutOfScope(s: Session, emit: Emit): void {
   backToMenu(s, emit);
 }
 
+/** Infer the appliance type from free text (used when the user describes instead of giving a model). */
+function detectApplianceType(text: string): "refrigerator" | "dishwasher" | undefined {
+  if (/dish ?washer|\bdish\b/i.test(text)) return "dishwasher";
+  if (/refriger|\bfridge\b|freezer|ice ?maker|water ?filter|crisper/i.test(text)) return "refrigerator";
+  return undefined;
+}
+
 function applianceTypeName(t: string): string {
   return t === "refrigerator" ? "refrigerator" : "dishwasher";
 }
@@ -403,6 +410,36 @@ async function showInstallGuide(s: Session, emit: Emit, partNo: string): Promise
       text: `${part.name} (${partNo}) doesn't have a step-by-step guide yet, but you can ask me installation questions and I'll search our repair materials.`,
     });
     s.stage = "install_qa";
+  }
+}
+
+/** Pre-order branch: match a part from a free-text description (exact search first, agent on miss). */
+async function handlePartDesc(s: Session, emit: Emit, text: string): Promise<void> {
+  pushHistory(s, "user", text);
+  await recordSearch(s.userId, text, s.modelNo);
+  // Deterministic search first (zero tokens); the agent only runs if it finds nothing
+  const hits = await searchParts({
+    query: text,
+    applianceType: s.applianceType,
+    modelNo: s.modelNo,
+    limit: 3,
+  });
+  if (hits.length > 0) {
+    emit({ kind: "text", text: "Here's what matches your description:" });
+    await emitPartCards(s, emit, hits);
+    emit({
+      kind: "text",
+      text: "Tap “Add to Cart” to confirm, or keep describing other parts you need.",
+    });
+    return;
+  }
+  const partNos = await agentMatchParts(s, text, emit);
+  const parts = (await Promise.all(partNos.map((no) => getPartByNo(no)))).filter((p): p is Part => !!p);
+  if (parts.length > 0) {
+    await emitPartCards(s, emit, parts);
+  } else {
+    emit({ kind: "text", text: APOLOGY });
+    backToMenu(s, emit);
   }
 }
 
@@ -801,8 +838,29 @@ export async function handleEvent(
         }
         case "await_model": {
           if (isOutOfScope(text)) { deflectOutOfScope(s, emit); break; }
+          // The user was asked for a model but people often type something else.
+          // A part number → handle the part. A model number → look it up.
+          // Anything else is a description → continue by intent instead of dead-ending.
+          const partMatch = text.match(PART_NO_RE);
+          if (partMatch) {
+            await lookupPartFlow(s, emit, partMatch[0].toUpperCase());
+            break;
+          }
           const m = text.match(MODEL_NO_RE);
-          await modelLookupFlow(s, emit, (m?.[0] ?? text).toUpperCase());
+          if (m) {
+            await modelLookupFlow(s, emit, m[0].toUpperCase());
+            break;
+          }
+          const apType = detectApplianceType(text);
+          if (apType) s.applianceType = apType;
+          if (s.intent === "broken") {
+            await handleFaultDesc(s, emit, text);
+          } else if (s.intent === "preorder") {
+            await handlePartDesc(s, emit, text);
+          } else {
+            // genuinely looks like a (mis-typed) model → similar options / apology
+            await modelLookupFlow(s, emit, text.toUpperCase());
+          }
           break;
         }
         case "await_fault_desc": {
@@ -817,32 +875,7 @@ export async function handleEvent(
         }
         case "await_part_desc": {
           if (isOutOfScope(text)) { deflectOutOfScope(s, emit); break; }
-          pushHistory(s, "user", text);
-          await recordSearch(s.userId, text, s.modelNo);
-          // Deterministic search first (zero tokens); the agent only runs if it finds nothing
-          const hits = await searchParts({
-            query: text,
-            applianceType: s.applianceType,
-            modelNo: s.modelNo,
-            limit: 3,
-          });
-          if (hits.length > 0) {
-            emit({ kind: "text", text: "Here's what matches your description:" });
-            await emitPartCards(s, emit, hits);
-            emit({
-              kind: "text",
-              text: "Tap “Add to Cart” to confirm, or keep describing other parts you need.",
-            });
-          } else {
-            const partNos = await agentMatchParts(s, text, emit);
-            const parts = (await Promise.all(partNos.map((no) => getPartByNo(no)))).filter((p): p is Part => !!p);
-            if (parts.length > 0) {
-              await emitPartCards(s, emit, parts);
-            } else {
-              emit({ kind: "text", text: APOLOGY });
-              backToMenu(s, emit);
-            }
-          }
+          await handlePartDesc(s, emit, text);
           break;
         }
         case "install_pick": {
