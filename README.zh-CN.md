@@ -27,7 +27,7 @@
 | **品牌化聊天 UI** | Next.js 16 + React 19,PartSelect 青绿/金黄配色,SSE 流式,丰富的交互消息类型(卡片、chips、表单) |
 | **身份(邮箱或游客)** | 邮箱载入购买历史;游客全功能且懒建档;会话中输入裸邮箱可切换账号 |
 | **个性化** | 已购家电渲染成一键卡片;只买过零件的用户由**零件兼容性反推可能机型**;地址自动预填上次订单 |
-| **视觉输入 📷** | 上传**铭牌照片**(读出型号)或**坏零件照片**(识别零件)→ 进入流程;非家电照片被拒绝 |
+| **视觉输入 📷** | 上传**铭牌照片** → 读出型号并进入流程;读不到或非家电的照片会被拒绝并引导手动输入型号 |
 | **故障诊断** | 先给带来源链接的自助排查步骤(RAG),再给可确认的替换零件卡片 |
 | **零件查询与搜索** | 按精确 PS 号、按故障症状、或按自然语言描述;已知型号时限定兼容件 |
 | **兼容性确认** | 来自关系型「零件↔型号」矩阵的精确答案——绝不猜测 |
@@ -41,7 +41,7 @@
 | **数据库** | 异步驱动双后端(`DB_DRIVER`):开发用 SQLite,**生产用 RDS PostgreSQL** |
 | **真实目录数据** | 从 partselect.com 摄入约 620 个真实零件(真实 PS 号、价格、库存、症状、视频) |
 | **范围防护栏** | 三层防护把 Agent 锁定在冰箱/洗碗机配件 |
-| **测试** | 49 项自动化端到端断言 |
+| **测试** | 52 项自动化端到端断言 |
 | **部署** | EC2 + nginx + systemd + Let's Encrypt TLS + 自有域名;Bedrock 走 IAM |
 
 ---
@@ -188,7 +188,7 @@ Amazon Bedrock:Claude Sonnet 4.5(推理 + 视觉)· Titan Embeddings v2
 - `profileSummary` 把**一行**画像注入 Agent 上下文,而非回放聊天历史——个性化的 token 成本接近零。
 
 ### 4.4 视觉输入 📷
-- [vision.ts](partselect-agent/src/server/vision.ts):前端把图片缩到 ≤1024px JPEG,`handleImage` 调用 **Bedrock Converse** 的图像块。模型返回恰好一行——`MODEL: <型号>`、`PART: <描述> | <家电>` 或 `UNCLEAR: <原因>`——路由进 ⟦M 模块⟧ 或零件搜索。
+- [vision.ts](partselect-agent/src/server/vision.ts):前端把图片缩到 ≤1024px JPEG,`handleImage` 调用 **Bedrock Converse** 的图像块。收窄到唯一可靠的任务——读型号——模型只返回一行 `MODEL: <型号>` 或 `UNCLEAR: <原因>`,路由进 ⟦M 模块⟧。(凭外观识别具体零件对任何视觉模型都不可靠——零件长得像、照片里没零件号——所以不做。)
 - 范围防护栏延伸到图片:非家电照片返回 `UNCLEAR`。无 LLM → 优雅降级为"请手动输入型号"。
 
 ### 4.5 诊断(损坏分支)
@@ -278,7 +278,7 @@ partselect-agent/
 │   ├── services/           # catalog · orders · users · payments(事实来源)
 │   ├── embeddings/         # Bedrock Titan / 本地 provider 抽象
 │   └── db/                 # schema.sql + seed.ts
-├── scripts/                # seed · ingest-real · embed · test-flow(43 断言)
+├── scripts/                # seed · ingest-real · embed · test-flow(52 断言)
 └── data/ingested/          # 采集的 partselect.com 真实目录
 ```
 
@@ -292,7 +292,7 @@ npm install
 npm run db:seed     # SQLite + 合成种子
 npm run ingest      # 合并 partselect.com 真实数据 → 18 型号 / 664 零件 / 938 兼容对
 npm run dev         # http://localhost:3000(不配任何 key 也完整可用)
-npm run test:flow   # 43 项端到端断言
+npm run test:flow   # 52 项端到端断言
 ```
 
 可选能力(环境变量):

@@ -27,7 +27,7 @@ A production-deployed chat agent for the PartSelect e-commerce scenario, scoped 
 | **Branded chat UI** | Next.js 16 + React 19, PartSelect teal/gold, SSE streaming, rich interactive message types (cards, chips, forms) |
 | **Identity (email or guest)** | Email loads purchase history; guests work fully and are created lazily; a bare email mid-chat switches accounts |
 | **Personalization** | Owned appliances as one-click cards; for parts-only buyers, the likely appliance is **inferred from part compatibility**; addresses pre-fill from the last order |
-| **Vision input 📷** | Upload a photo of the **model nameplate** (reads the model number) or a **broken part** (identifies it) → routes into the flow; non-appliance photos are refused |
+| **Vision input 📷** | Upload a photo of the **model nameplate** → reads the model number and routes into the flow; unreadable or non-appliance photos are refused with a prompt to type the number |
 | **Fault diagnosis** | Self-help troubleshooting first (RAG with source links), then replacement-part recommendations as confirmable cards |
 | **Part lookup & search** | By exact PartSelect number, by symptom, or by natural-language description; scoped to a model when known |
 | **Compatibility check** | Exact answer from a relational part↔model matrix — never guessed |
@@ -41,7 +41,7 @@ A production-deployed chat agent for the PartSelect e-commerce scenario, scoped 
 | **Database** | Async driver with two backends (`DB_DRIVER`): SQLite for dev, **RDS PostgreSQL in production** |
 | **Real catalog data** | ~620 real parts ingested from partselect.com (real PS numbers, prices, stock, symptoms, videos) |
 | **Scope guardrails** | Three layers keep the agent on refrigerator/dishwasher parts only |
-| **Tests** | 49 automated end-to-end assertions |
+| **Tests** | 52 automated end-to-end assertions |
 | **Deployment** | EC2 + nginx + systemd + Let's Encrypt TLS on a custom domain; Bedrock via IAM |
 
 ---
@@ -188,7 +188,7 @@ Stages (`Session.stage` in [session.ts](partselect-agent/src/server/session.ts))
 - `profileSummary` injects a **one-line** profile into the agent context instead of replaying chat history — personalization at near-zero token cost.
 
 ### 4.4 Vision input 📷
-- [vision.ts](partselect-agent/src/server/vision.ts): the client downscales the image to ≤1024px JPEG, then `handleImage` calls **Bedrock Converse** with an image content block. The model returns exactly one line — `MODEL: <no>`, `PART: <desc> | <appliance>`, or `UNCLEAR: <reason>` — which routes into ⟦M module⟧ or part search.
+- [vision.ts](partselect-agent/src/server/vision.ts): the client downscales the image to ≤1024px JPEG, then `handleImage` calls **Bedrock Converse** with an image content block. Scoped to one reliable task — reading the model number — the model returns exactly one line, `MODEL: <no>` or `UNCLEAR: <reason>`, which routes into the ⟦M module⟧. (Identifying a specific part from its appearance is unreliable for any vision model — parts look alike and the photo has no part number — so we don't attempt it.)
 - The scope guardrail extends to images: a non-appliance photo returns `UNCLEAR`. No LLM → graceful "please type your model number".
 
 ### 4.5 Diagnosis (broken branch)
@@ -278,7 +278,7 @@ partselect-agent/
 │   ├── services/           # catalog · orders · users · payments (source of truth)
 │   ├── embeddings/         # Bedrock Titan / local provider abstraction
 │   └── db/                 # schema.sql + seed.ts
-├── scripts/                # seed · ingest-real · embed · test-flow (43 assertions)
+├── scripts/                # seed · ingest-real · embed · test-flow (52 assertions)
 └── data/ingested/          # harvested real partselect.com catalog
 ```
 
@@ -292,7 +292,7 @@ npm install
 npm run db:seed     # SQLite + synthetic seed
 npm run ingest      # merge real partselect.com data → 18 models / 664 parts / 938 compat
 npm run dev         # http://localhost:3000  (fully functional with NO API keys)
-npm run test:flow   # 43 end-to-end assertions
+npm run test:flow   # 52 end-to-end assertions
 ```
 
 Optional capabilities via env:
